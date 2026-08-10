@@ -33,6 +33,7 @@ interface PendingDeviceFlow {
 export class GitHubDeviceFlow {
   private pending: PendingDeviceFlow | null = null;
   private starting: Promise<GitHubDeviceFlowAuthorization> | null = null;
+  private lastError: unknown | null = null;
   private readonly options: GitHubDeviceFlowOptions;
 
   constructor(options: GitHubDeviceFlowOptions) {
@@ -47,6 +48,8 @@ export class GitHubDeviceFlow {
       return this.starting;
     }
 
+    this.pending = null;
+    this.lastError = null;
     let verificationReceived = false;
     const verification = Promise.withResolvers<Verification>();
 
@@ -107,8 +110,9 @@ export class GitHubDeviceFlow {
       () => {
         if (this.starting === starting) this.starting = null;
       },
-      () => {
+      (error: unknown) => {
         if (this.starting === starting) this.starting = null;
+        this.lastError = error;
       },
     );
     return starting;
@@ -116,12 +120,16 @@ export class GitHubDeviceFlow {
 
   poll(): GitHubDeviceFlowPollResult {
     return (
-      this.pending?.state ?? { status: "error", error: new Error("No device flow is active.") }
+      this.pending?.state ??
+      (this.lastError === null
+        ? { status: "error", error: new Error("No device flow is active.") }
+        : { status: "error", error: this.lastError })
     );
   }
 
   clear(): void {
     this.pending = null;
     this.starting = null;
+    this.lastError = null;
   }
 }

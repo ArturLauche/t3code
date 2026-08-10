@@ -185,10 +185,18 @@ export const make = Effect.gen(function* () {
           token: credential.value.token,
         }).pipe(
           Effect.catch((error) =>
-            Effect.logWarning("Could not refresh a synchronized GitHub credential.", {
-              environmentId,
-              operation: error.operation,
-            }),
+            Ref.update(trustedEnvironments, (current) => {
+              const next = new Map(current);
+              next.delete(environmentId);
+              return next;
+            }).pipe(
+              Effect.andThen(
+                Effect.logWarning("Could not refresh a synchronized GitHub credential.", {
+                  environmentId,
+                  operation: error.operation,
+                }),
+              ),
+            ),
           ),
         ),
       { concurrency: "unbounded", discard: true },
@@ -344,7 +352,7 @@ export const make = Effect.gen(function* () {
       deviceFlow?.clear();
       if (failedRevocations > 0) {
         return yield* githubError(
-          "disconnect",
+          "disconnect-remote-revocation",
           `GitHub was disconnected locally, but ${failedRevocations} remote credential ${failedRevocations === 1 ? "copy" : "copies"} could not be revoked immediately and will expire automatically.`,
         );
       }

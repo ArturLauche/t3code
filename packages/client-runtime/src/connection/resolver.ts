@@ -328,7 +328,9 @@ export const make = Effect.gen(function* () {
       yield* sourceControlCredentials.value.sync(prepared).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("Could not synchronize optional source-control credentials.", {
-            cause,
+            reason: typeof cause === "object" && cause !== null && "_tag" in cause
+              ? String(cause._tag)
+              : "unknown",
             environmentId: prepared.target.environmentId,
           }),
         ),

@@ -188,10 +188,11 @@ export function GitHubConnectionSettingsSection() {
       setAuthorization(null);
       await refresh();
     } catch (cause) {
+      await refresh().catch(() => undefined);
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not disconnect GitHub",
+          title: "GitHub disconnected with a warning",
           description: message(cause),
         }),
       );

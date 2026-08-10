@@ -12,8 +12,8 @@ GitHub's device page, displays a one-time code, and polls until authorization co
 must belong to your own GitHub OAuth app with Device Flow enabled; it is public application metadata,
 not a client secret.
 
-For a fork build, set the `T3CODE_GITHUB_CLIENT_ID` GitHub Actions repository variable. Do not add a
-GitHub OAuth client secret to a desktop build.
+If you build T3 Code from a fork, follow the [fork build guide](../operations/fork-builds.md) for
+GitHub connection configuration. Do not add a GitHub OAuth client secret to a desktop build.
 
 ### Fine-grained personal access token
 

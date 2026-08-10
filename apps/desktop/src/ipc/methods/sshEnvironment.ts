@@ -166,26 +166,26 @@ export const bootstrapSshBearerSession = DesktopIpc.makeIpcMethod({
         credential,
       }),
     )(httpBaseUrl);
-    const descriptor = yield* withLoopbackSshApi(
-      "fetch-environment-descriptor",
+    yield* withLoopbackSshApi(
+      "register-github-environment",
       (resolvedHttpBaseUrl) =>
-        fetchRemoteEnvironmentDescriptor({ httpBaseUrl: resolvedHttpBaseUrl }),
-    )(httpBaseUrl);
-    const resolvedHttpBaseUrl = yield* resolveLoopbackSshHttpBaseUrl(httpBaseUrl).pipe(
-      Effect.mapError(
-        (cause) =>
-          new DesktopSshEnvironmentRequestError({
-            operation: "bootstrap-bearer-session",
-            cause,
-            sshHttpStatus: readSshHttpStatus(cause),
-          }),
+        Effect.gen(function* () {
+          const descriptor = yield* fetchRemoteEnvironmentDescriptor({
+            httpBaseUrl: resolvedHttpBaseUrl,
+          });
+          yield* github.registerTrustedEnvironment({
+            environmentId: descriptor.environmentId,
+            httpBaseUrl: resolvedHttpBaseUrl,
+            accessToken: access.access_token,
+          });
+        }),
+    )(httpBaseUrl).pipe(
+      Effect.catch(() =>
+        Effect.logWarning("Could not register the optional GitHub credential bridge for SSH.", {
+          reason: "registration-failed",
+        }),
       ),
     );
-    yield* github.registerTrustedEnvironment({
-      environmentId: descriptor.environmentId,
-      httpBaseUrl: resolvedHttpBaseUrl,
-      accessToken: access.access_token,
-    });
     return access;
   }),
 });

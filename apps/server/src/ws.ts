@@ -50,6 +50,7 @@ import {
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  EnvironmentAuthenticatedPrincipal,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -2214,6 +2215,16 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             failEnvironmentInternal("internal_error", error),
           ),
         );
+        const authenticatedPrincipal = {
+          sessionId: session.sessionId,
+          subject: session.subject,
+          method: session.method,
+          scopes: new Set(session.scopes),
+          ...(session.proofKeyThumbprint === undefined
+            ? {}
+            : { proofKeyThumbprint: session.proofKeyThumbprint }),
+          ...(session.expiresAt === undefined ? {} : { expiresAt: session.expiresAt }),
+        };
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
           disableTracing: true,
         }).pipe(
@@ -2248,7 +2259,10 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         );
         return yield* Effect.acquireUseRelease(
           sessions.markConnected(session.sessionId),
-          () => rpcWebSocketHttpEffect,
+          () =>
+            rpcWebSocketHttpEffect.pipe(
+              Effect.provideService(EnvironmentAuthenticatedPrincipal, authenticatedPrincipal),
+            ),
           () => sessions.markDisconnected(session.sessionId),
         );
       }).pipe(

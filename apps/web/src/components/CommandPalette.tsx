@@ -1909,24 +1909,27 @@ function OpenCommandPaletteDialog(props: {
     return getAddProjectInitialQueryForEnvironment(environmentId);
   }
 
-  function continueWithGitHubRepository(
-    repository: Pick<GitHubRepositorySummary, "nameWithOwner" | "url" | "sshUrl" | "cloneUrl">,
-  ): void {
-    if (addProjectCloneFlow?.step !== "repository") return;
-    const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
-    const selection = githubRepositoryCloneSelection(repository);
-    setAddProjectCloneFlow({
-      step: "confirm",
-      environmentId: addProjectCloneFlow.environmentId,
-      source: "github",
-      repositoryInput: repository.nameWithOwner,
-      repository: selection.repository,
-      remoteUrl: selection.remoteUrl,
-    });
-    setHighlightedItemValue(null);
-    setQuery(destinationPath);
-    setBrowseGeneration((generation) => generation + 1);
-  }
+  const continueWithGitHubRepository = useCallback(
+    (
+      repository: Pick<GitHubRepositorySummary, "nameWithOwner" | "url" | "sshUrl" | "cloneUrl">,
+    ): void => {
+      if (addProjectCloneFlow?.step !== "repository") return;
+      const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
+      const selection = githubRepositoryCloneSelection(repository);
+      setAddProjectCloneFlow({
+        step: "confirm",
+        environmentId: addProjectCloneFlow.environmentId,
+        source: "github",
+        repositoryInput: repository.nameWithOwner,
+        repository: selection.repository,
+        remoteUrl: selection.remoteUrl,
+      });
+      setHighlightedItemValue(null);
+      setQuery(destinationPath);
+      setBrowseGeneration((generation) => generation + 1);
+    },
+    [addProjectCloneFlow, getAddProjectInitialQueryForEnvironment],
+  );
 
   async function submitAddProjectCloneFlow(destinationPathInput?: string): Promise<void> {
     if (!addProjectCloneFlow) {
@@ -2225,7 +2228,7 @@ function OpenCommandPaletteDialog(props: {
             },
           ]
         : [],
-    [addProjectCloneFlow, githubConnection, githubRepositories],
+    [addProjectCloneFlow, continueWithGitHubRepository, githubConnection, githubRepositories],
   );
 
   let displayedGroups: CommandPaletteView["groups"] = filteredGroups;

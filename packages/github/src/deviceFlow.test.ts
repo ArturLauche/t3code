@@ -61,7 +61,10 @@ describe("GitHub device authorization state", () => {
     const flow = new GitHubDeviceFlow({ clientId: "client-id" });
 
     await expect(flow.start()).rejects.toThrow("device flow unavailable");
-    expect(flow.poll()).toMatchObject({ status: "error" });
+    expect(flow.poll()).toMatchObject({
+      status: "error",
+      error: expect.objectContaining({ message: "device flow unavailable" }),
+    });
   });
 
   it("shares one startup between concurrent callers", async () => {
