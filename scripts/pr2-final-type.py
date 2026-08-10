@@ -68,11 +68,18 @@ replace_once(
     '''    verify?.({''',
     '''    verification.current?.({''',
 )
-replace_once(
-    "apps/web/src/components/CommandPalette.tsx",
-    '''      if (!canCreateProjectInEnvironment(environment?.connection.phase)) {''',
-    '''      if (
+
+command_palette = Path("apps/web/src/components/CommandPalette.tsx")
+text = command_palette.read_text()
+marker = "  const startAddProjectSourceSelection = useCallback("
+if text.count(marker) != 1:
+    raise RuntimeError(f"Command Palette marker count was {text.count(marker)}")
+prefix, suffix = text.split(marker, 1)
+old_guard = '''      if (!canCreateProjectInEnvironment(environment?.connection.phase)) {'''
+new_guard = '''      if (
         environment === undefined ||
         !canCreateProjectInEnvironment(environment.connection.phase)
-      ) {''',
-)
+      ) {'''
+if suffix.count(old_guard) != 1:
+    raise RuntimeError(f"Scoped environment guard count was {suffix.count(old_guard)}")
+command_palette.write_text(prefix + marker + suffix.replace(old_guard, new_guard, 1))
