@@ -31,6 +31,7 @@ jobs:
           python scripts/fix-pr2-runner.py
           python scripts/pr2-final-source.py
           python scripts/pr2-final-post.py
+          python scripts/pr2-final-type.py
 
       - name: Format
         run: vp fmt
@@ -48,7 +49,7 @@ jobs:
         run: vp run release:smoke
 
       - name: Remove temporary source patches
-        run: git rm scripts/pr2-final-source.py scripts/fix-pr2-runner.py scripts/pr2-final-post.py
+        run: git rm scripts/pr2-final-source.py scripts/fix-pr2-runner.py scripts/pr2-final-post.py scripts/pr2-final-type.py
 
       - name: Commit validated source fixes
         shell: bash
@@ -61,4 +62,4 @@ jobs:
           git commit -m "fix: close remaining PR review findings"
           git push origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: Effect DateTime and inner-palette ref fixes
+# trigger: GitHub device-flow TS control-flow fixes
