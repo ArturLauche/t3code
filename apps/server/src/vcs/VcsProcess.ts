@@ -94,8 +94,11 @@ export const make = Effect.gen(function* () {
 
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
     const githubEnvironment =
-      (input.command === "git" || input.command === "gh") && Option.isSome(githubBroker)
-        ? yield* githubBroker.value.processEnvironment.pipe(
+      Option.isSome(githubBroker) && (input.command === "git" || input.command === "gh")
+        ? yield* (input.command === "gh"
+            ? githubBroker.value.cliEnvironment
+            : githubBroker.value.processEnvironment
+          ).pipe(
             Effect.catch((error) =>
               Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
                 operation: error.operation,
@@ -117,14 +120,11 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        ...(input.env !== undefined || Option.isSome(githubEnvironment)
-          ? {
-              env: {
-                ...input.env,
-                ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
-              },
-            }
-          : {}),
+        env: {
+          ...process.env,
+          ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
+          ...input.env,
+        },
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: "truncate",

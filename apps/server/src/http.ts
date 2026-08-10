@@ -28,20 +28,20 @@ import {
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { OtlpTracer } from "effect/unstable/observability";
 
-import * as ServerConfig from "./config.ts";
-import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
-import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import { traceRelayRequest } from "./cloud/traceRelayRequest.ts";
 import {
   annotateEnvironmentRequest,
-  failEnvironmentScopeRequired,
   failEnvironmentAuthInvalid,
   failEnvironmentInternal,
+  failEnvironmentScopeRequired,
 } from "./auth/http.ts";
+import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
+import { traceRelayRequest } from "./cloud/traceRelayRequest.ts";
+import * as ServerConfig from "./config.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import * as GitHubCredentialBroker from "./sourceControl/GitHubCredentialBroker.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
+import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
+import * as GitHubCredentialBroker from "./sourceControl/GitHubCredentialBroker.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -55,13 +55,6 @@ export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const devOrigin = config.devUrl?.origin;
-    // Dev uses credentialed requests from Vite or the Electron custom origin, so both must be
-    // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
-    //
-    // T3CODE_DEV_ALLOWED_ORIGINS covers dev servers reached from a second
-    // origin — a tailnet name, a LAN IP, a phone. Browser dev normally proxies
-    // through Vite and is same-origin (no preflight at all), so this is a
-    // safety net for the desktop renderer and any direct-to-backend caller.
     return HttpRouter.cors({
       ...(devOrigin
         ? {
@@ -109,6 +102,7 @@ const authenticateRawRouteWithScope = (
     if (!session.scopes.includes(scope)) {
       return yield* failEnvironmentScopeRequired(scope);
     }
+    return session;
   });
 
 export const serverEnvironmentHttpApiLayer = HttpApiBuilder.group(
@@ -190,7 +184,7 @@ export const githubCredentialInjectionRouteLayer = HttpRouter.add(
   "PUT",
   "/api/source-control/github/credential",
   Effect.gen(function* () {
-    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const session = yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
     const request = yield* HttpServerRequest.HttpServerRequest;
     const decoded = yield* decodeGitHubCredentialInjection(yield* request.json).pipe(Effect.option);
     if (Option.isNone(decoded)) {
@@ -201,6 +195,7 @@ export const githubCredentialInjectionRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("GitHub integration is unavailable.", { status: 503 });
     }
     yield* broker.value.injectEphemeral({
+      sessionId: String(session.sessionId),
       token: decoded.value.token,
       ...(decoded.value.ttlSeconds === undefined ? {} : { ttlSeconds: decoded.value.ttlSeconds }),
     });
@@ -218,12 +213,12 @@ export const githubCredentialRemovalRouteLayer = HttpRouter.add(
   "DELETE",
   "/api/source-control/github/credential",
   Effect.gen(function* () {
-    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const session = yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
     const broker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
     if (Option.isNone(broker)) {
       return HttpServerResponse.text("GitHub integration is unavailable.", { status: 503 });
     }
-    yield* broker.value.clearEphemeral;
+    yield* broker.value.clearEphemeral(String(session.sessionId));
     return HttpServerResponse.empty({ status: 204 });
   }).pipe(
     Effect.catchTags({
