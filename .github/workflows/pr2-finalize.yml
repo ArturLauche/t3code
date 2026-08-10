@@ -23,7 +23,7 @@ jobs:
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb
         with:
           node-version-file: package.json
-          cache: true
+          cache: false
           run-install: true
 
       - name: Apply remaining source review fixes
@@ -62,4 +62,4 @@ jobs:
           git commit -m "fix: close remaining PR review findings"
           git push origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: scoped Command Palette environment guard
+# trigger: bypass stalled dependency cache restore
