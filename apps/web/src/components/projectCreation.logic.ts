@@ -1,3 +1,4 @@
+import type { ConnectionTargetKind } from "@t3tools/client-runtime/connection";
 import type {
   CloudSandboxCreateInput,
   CloudSandboxProviderConnection,
@@ -11,14 +12,28 @@ export type ExecutionEnvironmentPickerCategory =
   | "Cloud Sandbox"
   | "Remote";
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled connection target kind: ${String(value)}`);
+}
+
 export function executionEnvironmentPickerCategory(input: {
-  readonly targetTag: string;
+  readonly targetTag: ConnectionTargetKind;
   readonly desktopLocal: boolean;
 }): ExecutionEnvironmentPickerCategory {
-  if (input.targetTag === "CloudSandboxConnectionTarget") return "Cloud Sandbox";
-  if (input.targetTag === "SshConnectionTarget") return "SSH Remote";
-  if (input.targetTag === "PrimaryConnectionTarget" || input.desktopLocal) return "Local";
-  return "Remote";
+  switch (input.targetTag) {
+    case "PrimaryConnectionTarget":
+      return "Local";
+    case "BearerConnectionTarget":
+      return input.desktopLocal ? "Local" : "Remote";
+    case "RelayConnectionTarget":
+      return "Remote";
+    case "SshConnectionTarget":
+      return "SSH Remote";
+    case "CloudSandboxConnectionTarget":
+      return "Cloud Sandbox";
+    default:
+      return assertNever(input.targetTag);
+  }
 }
 
 export function githubRepositoryCloneSelection(

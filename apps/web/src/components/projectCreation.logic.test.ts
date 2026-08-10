@@ -11,9 +11,11 @@ describe("Add Project execution environment choices", () => {
   it.each([
     ["PrimaryConnectionTarget", false, "Local"],
     ["BearerConnectionTarget", true, "Local"],
+    ["BearerConnectionTarget", false, "Remote"],
+    ["RelayConnectionTarget", false, "Remote"],
     ["SshConnectionTarget", false, "SSH Remote"],
     ["CloudSandboxConnectionTarget", false, "Cloud Sandbox"],
-  ])("labels %s as %s execution", (targetTag, desktopLocal, expected) => {
+  ] as const)("labels %s as %s execution", (targetTag, desktopLocal, expected) => {
     expect(executionEnvironmentPickerCategory({ targetTag, desktopLocal })).toBe(expected);
   });
 

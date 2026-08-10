@@ -32,53 +32,89 @@ interface PendingDeviceFlow {
 
 export class GitHubDeviceFlow {
   private pending: PendingDeviceFlow | null = null;
+  private starting: Promise<GitHubDeviceFlowAuthorization> | null = null;
   private readonly options: GitHubDeviceFlowOptions;
 
   constructor(options: GitHubDeviceFlowOptions) {
     this.options = options;
   }
 
-  async start(): Promise<GitHubDeviceFlowAuthorization> {
+  start(): Promise<GitHubDeviceFlowAuthorization> {
     if (this.pending?.state.status === "pending") {
-      return this.pending.authorization;
+      return Promise.resolve(this.pending.authorization);
+    }
+    if (this.starting !== null) {
+      return this.starting;
     }
 
     let resolveVerification: ((verification: Verification) => void) | null = null;
-    const verification = new Promise<Verification>((resolve) => {
+    let rejectVerification: ((error: unknown) => void) | null = null;
+    let verificationReceived = false;
+    const verification = new Promise<Verification>((resolve, reject) => {
       resolveVerification = resolve;
-    });
-    const auth = createOAuthDeviceAuth({
-      clientId: this.options.clientId,
-      clientType: "oauth-app",
-      scopes: [...(this.options.scopes ?? ["repo", "read:org", "workflow"])],
-      onVerification: (value) => {
-        resolveVerification?.(value);
-      },
+      rejectVerification = reject;
     });
 
-    const authentication = auth({ type: "oauth" });
-    const value = await verification;
-    const authorization = {
-      userCode: value.user_code,
-      verificationUri: value.verification_uri,
-      expiresInSeconds: value.expires_in,
-      intervalSeconds: value.interval,
-    } satisfies GitHubDeviceFlowAuthorization;
-    const pending: PendingDeviceFlow = {
-      authorization,
-      state: { status: "pending" },
-      result: Promise.resolve(),
-    };
-    pending.result = authentication.then(
-      (result) => {
-        pending.state = { status: "complete", authentication: result };
+    let authentication: Promise<OAuthAppAuthentication>;
+    const starting = verification.then((value) => {
+      const authorization = {
+        userCode: value.user_code,
+        verificationUri: value.verification_uri,
+        expiresInSeconds: value.expires_in,
+        intervalSeconds: value.interval,
+      } satisfies GitHubDeviceFlowAuthorization;
+      const pending: PendingDeviceFlow = {
+        authorization,
+        state: { status: "pending" },
+        result: Promise.resolve(),
+      };
+      pending.result = authentication.then(
+        (result) => {
+          pending.state = { status: "complete", authentication: result };
+        },
+        (error: unknown) => {
+          pending.state = { status: "error", error };
+        },
+      );
+      this.pending = pending;
+      return authorization;
+    });
+    this.starting = starting;
+
+    try {
+      const auth = createOAuthDeviceAuth({
+        clientId: this.options.clientId,
+        clientType: "oauth-app",
+        scopes: [...(this.options.scopes ?? ["repo", "read:org", "workflow"])],
+        onVerification: (value) => {
+          verificationReceived = true;
+          resolveVerification?.(value);
+        },
+      });
+      authentication = auth({ type: "oauth" });
+      void authentication.then(
+        () => {
+          if (!verificationReceived) {
+            rejectVerification?.(new Error("GitHub device authorization completed without verification."));
+          }
+        },
+        (error: unknown) => rejectVerification?.(error),
+      );
+    } catch (error) {
+      authentication = Promise.reject(error);
+      void authentication.catch(() => undefined);
+      rejectVerification?.(error);
+    }
+
+    void starting.then(
+      () => {
+        if (this.starting === starting) this.starting = null;
       },
-      (error: unknown) => {
-        pending.state = { status: "error", error };
+      () => {
+        if (this.starting === starting) this.starting = null;
       },
     );
-    this.pending = pending;
-    return authorization;
+    return starting;
   }
 
   poll(): GitHubDeviceFlowPollResult {
@@ -89,5 +125,6 @@ export class GitHubDeviceFlow {
 
   clear(): void {
     this.pending = null;
+    this.starting = null;
   }
 }

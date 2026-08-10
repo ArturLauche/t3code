@@ -35,6 +35,7 @@ export function executionEnvironmentCapabilities(
 ): ExecutionEnvironmentOperationCapabilities {
   const common = {
     connect: true,
+    start: false,
     status: true,
     bootstrap: true,
     commandExecution: true,
@@ -48,6 +49,8 @@ export function executionEnvironmentCapabilities(
     case "CloudSandboxConnectionTarget":
       return {
         ...common,
+        connect: cloudLifecycle?.connect ?? false,
+        start: cloudLifecycle?.start ?? false,
         create: true,
         shutdown: cloudLifecycle?.stop ?? false,
         pause: cloudLifecycle?.pause ?? false,
