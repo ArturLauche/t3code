@@ -1,0 +1,47 @@
+name: PR 2 finalize review fixes
+
+on:
+  push:
+    branches:
+      - agent/execution-environments-github-sandboxes
+    paths:
+      - .github/workflows/pr2-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: agent/execution-environments-github-sandboxes
+          fetch-depth: 0
+
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Apply remaining mechanical review fixes
+        run: python scripts/pr2-finalize.py
+
+      - name: Format changed sources
+        run: vp fmt
+
+      - name: Remove temporary patch machinery
+        run: git rm .github/workflows/pr2-finalize.yml scripts/pr2-finalize.py
+
+      - name: Commit review fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Artur Lauche"
+          git config user.email "118263652+ArturLauche@users.noreply.github.com"
+          git add -u
+          git diff --cached --check
+          git commit -m "fix: address remaining cross-package review findings"
+          git push origin HEAD:agent/execution-environments-github-sandboxes
