@@ -33,7 +33,7 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Apply stale assertion fix
+      - name: Apply final CI fixes
         run: python scripts/pr2-ci-final.py
 
       - name: Format
@@ -69,3 +69,5 @@ jobs:
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
             push --force-with-lease=refs/heads/agent/execution-environments-github-sandboxes:"$GITHUB_SHA" \
             origin HEAD:agent/execution-environments-github-sandboxes
+
+# trigger: final typecheck corrections
