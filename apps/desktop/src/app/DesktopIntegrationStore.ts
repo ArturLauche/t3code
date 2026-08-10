@@ -201,8 +201,14 @@ export const make = Effect.gen(function* () {
       .makeDirectory(directory, { recursive: true })
       .pipe(Effect.mapError((cause) => fail("create-directory", cause)));
     yield* fileSystem
+      .chmod(directory, 0o700)
+      .pipe(Effect.mapError((cause) => fail("protect-directory", cause)));
+    yield* fileSystem
       .writeFileString(temporaryPath, `${encoded}\n`)
       .pipe(Effect.mapError((cause) => fail("write", cause)));
+    yield* fileSystem
+      .chmod(temporaryPath, 0o600)
+      .pipe(Effect.mapError((cause) => fail("protect-temporary-file", cause)));
     yield* fileSystem.rename(temporaryPath, storePath).pipe(
       Effect.mapError((cause) => fail("replace", cause)),
       Effect.ensuring(fileSystem.remove(temporaryPath, { force: true }).pipe(Effect.ignore)),
@@ -212,12 +218,14 @@ export const make = Effect.gen(function* () {
   const read = mutex.withPermits(1)(readUnlocked());
   const update = <A>(
     operation: string,
-    transform: (document: SecretDocument) => readonly [A, SecretDocument],
+    transform: (
+      document: SecretDocument,
+    ) => Effect.Effect<readonly [A, SecretDocument], DesktopIntegrationStoreError>,
   ): Effect.Effect<A, DesktopIntegrationStoreError> =>
     mutex.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* readUnlocked();
-        const [result, next] = transform(current);
+        const [result, next] = yield* transform(current);
         yield* writeUnlocked(next);
         return result;
       }).pipe(Effect.withSpan(`desktop.integrationStore.${operation}`)),
@@ -249,7 +257,7 @@ export const make = Effect.gen(function* () {
             createdAt: now,
             lastValidatedAt: null,
           };
-          return [
+          return Effect.succeed([
             connection,
             {
               ...document,
@@ -260,7 +268,7 @@ export const make = Effect.gen(function* () {
                 { connection, apiKey: input.apiKey },
               ],
             },
-          ];
+          ] as const);
         });
       }),
     markProviderValidated: (id) =>
@@ -268,9 +276,16 @@ export const make = Effect.gen(function* () {
         const validatedAt = DateTime.formatIso(yield* DateTime.now);
         return yield* update("markProviderValidated", (document) => {
           const stored = document.providers.find(({ connection }) => connection.id === id);
-          if (!stored) throw new Error(`Sandbox provider connection ${id} does not exist.`);
+          if (!stored) {
+            return Effect.fail(
+              fail(
+                "mark-provider-validated",
+                new Error(`Sandbox provider connection ${id} does not exist.`),
+              ),
+            );
+          }
           const connection = { ...stored.connection, lastValidatedAt: validatedAt };
-          return [
+          return Effect.succeed([
             connection,
             {
               ...document,
@@ -278,27 +293,30 @@ export const make = Effect.gen(function* () {
                 candidate.connection.id === id ? { ...candidate, connection } : candidate,
               ),
             },
-          ];
+          ] as const);
         });
       }),
     removeProviderConnection: (id) =>
-      update("removeProvider", (document) => [
-        undefined,
-        {
-          ...document,
-          providers: document.providers.filter(({ connection }) => connection.id !== id),
-          associations: document.associations.filter(
-            (association) => association.providerConnectionId !== id,
-          ),
-        },
-      ]),
+      update("removeProvider", (document) =>
+        Effect.succeed([
+          undefined,
+          {
+            ...document,
+            providers: document.providers.filter(({ connection }) => connection.id !== id),
+            associations: document.associations.filter(
+              (association) => association.providerConnectionId !== id,
+            ),
+          },
+        ] as const),
+      ),
     getGitHubCredential: read.pipe(Effect.map((document) => Option.fromNullishOr(document.github))),
     setGitHubCredential: (credential) =>
-      update("setGitHub", (document) => [undefined, { ...document, github: credential }]),
-    clearGitHubCredential: update("clearGitHub", (document) => [
-      undefined,
-      { ...document, github: null },
-    ]),
+      update("setGitHub", (document) =>
+        Effect.succeed([undefined, { ...document, github: credential }] as const),
+      ),
+    clearGitHubCredential: update("clearGitHub", (document) =>
+      Effect.succeed([undefined, { ...document, github: null }] as const),
+    ),
     getAssociation: (providerConnectionId, sandboxId) =>
       read.pipe(
         Effect.map((document) =>
@@ -319,7 +337,7 @@ export const make = Effect.gen(function* () {
             association.sandboxId !== input.sandboxId,
         );
         if (input.project !== null) associations.push({ ...input, project: input.project });
-        return [undefined, { ...document, associations }];
+        return Effect.succeed([undefined, { ...document, associations }] as const);
       }),
   });
 });

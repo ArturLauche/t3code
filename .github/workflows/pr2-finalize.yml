@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/pr2-finalize.yml
 
+# This follow-up change intentionally triggers the already-registered workflow.
 permissions:
   contents: write
 
