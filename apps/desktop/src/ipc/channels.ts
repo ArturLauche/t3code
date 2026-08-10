@@ -31,6 +31,28 @@ export const FETCH_SSH_SESSION_STATE_CHANNEL = "desktop:fetch-ssh-session-state"
 export const ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL = "desktop:issue-ssh-websocket-token";
 export const SSH_PASSWORD_PROMPT_CHANNEL = "desktop:ssh-password-prompt";
 export const RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL = "desktop:resolve-ssh-password-prompt";
+export const LIST_CLOUD_SANDBOX_PROVIDER_CONNECTIONS_CHANNEL =
+  "desktop:list-cloud-sandbox-provider-connections";
+export const SAVE_CLOUD_SANDBOX_PROVIDER_CONNECTION_CHANNEL =
+  "desktop:save-cloud-sandbox-provider-connection";
+export const VALIDATE_CLOUD_SANDBOX_PROVIDER_CONNECTION_CHANNEL =
+  "desktop:validate-cloud-sandbox-provider-connection";
+export const REMOVE_CLOUD_SANDBOX_PROVIDER_CONNECTION_CHANNEL =
+  "desktop:remove-cloud-sandbox-provider-connection";
+export const LIST_CLOUD_SANDBOXES_CHANNEL = "desktop:list-cloud-sandboxes";
+export const CREATE_CLOUD_SANDBOX_CHANNEL = "desktop:create-cloud-sandbox";
+export const ENSURE_CLOUD_SANDBOX_CHANNEL = "desktop:ensure-cloud-sandbox";
+export const DISCONNECT_CLOUD_SANDBOX_CHANNEL = "desktop:disconnect-cloud-sandbox";
+export const CLOUD_SANDBOX_LIFECYCLE_CHANNEL = "desktop:cloud-sandbox-lifecycle";
+export const ASSOCIATE_CLOUD_SANDBOX_PROJECT_CHANNEL = "desktop:associate-cloud-sandbox-project";
+export const GET_GITHUB_CONNECTION_STATUS_CHANNEL = "desktop:get-github-connection-status";
+export const CONNECT_GITHUB_PAT_CHANNEL = "desktop:connect-github-pat";
+export const START_GITHUB_DEVICE_AUTHORIZATION_CHANNEL =
+  "desktop:start-github-device-authorization";
+export const POLL_GITHUB_DEVICE_AUTHORIZATION_CHANNEL = "desktop:poll-github-device-authorization";
+export const DISCONNECT_GITHUB_CHANNEL = "desktop:disconnect-github";
+export const LIST_GITHUB_REPOSITORIES_CHANNEL = "desktop:list-github-repositories";
+export const SYNC_GITHUB_CREDENTIAL_CHANNEL = "desktop:sync-github-credential";
 export const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 export const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 export const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";

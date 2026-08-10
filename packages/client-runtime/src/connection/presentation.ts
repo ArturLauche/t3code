@@ -103,6 +103,11 @@ export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): stri
       return Option.isSome(entry.profile) && entry.profile.value._tag === "SshConnectionProfile"
         ? `${entry.profile.value.target.username}@${entry.profile.value.target.hostname}`
         : null;
+    case "CloudSandboxConnectionTarget":
+      return Option.isSome(entry.profile) &&
+        entry.profile.value._tag === "CloudSandboxConnectionProfile"
+        ? `${entry.profile.value.target.provider}:${entry.profile.value.target.sandboxId}`
+        : null;
   }
 }
 

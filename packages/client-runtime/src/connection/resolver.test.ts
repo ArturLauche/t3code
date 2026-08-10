@@ -160,6 +160,11 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
         })),
     disconnect: () => Effect.void,
   });
+  const cloudSandbox = ClientCapabilities.CloudSandboxEnvironmentGateway.of({
+    provision: () => Effect.die("unused"),
+    prepare: () => Effect.die("unused"),
+    disconnect: () => Effect.void,
+  });
 
   const dependencies = Layer.mergeAll(
     Layer.succeed(ConnectionProfileStore.ConnectionProfileStore, profileStore),
@@ -182,6 +187,7 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
     ),
     Layer.succeed(RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization, remote),
     Layer.succeed(ClientCapabilities.SshEnvironmentGateway, ssh),
+    Layer.succeed(ClientCapabilities.CloudSandboxEnvironmentGateway, cloudSandbox),
     Layer.succeed(
       ManagedRelay.ManagedRelayClient,
       relayClient(

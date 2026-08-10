@@ -12,6 +12,7 @@ import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   BearerConnectionCredential,
   BearerConnectionProfile,
+  CloudSandboxConnectionProfile,
   type ConnectionCatalogEntry,
   SshConnectionProfile,
 } from "./catalog.ts";
@@ -24,6 +25,7 @@ import {
 } from "./errors.ts";
 import type {
   BearerConnectionTarget,
+  CloudSandboxConnectionTarget,
   ConnectionTarget,
   PreparedConnection,
   PrimaryConnectionTarget,
@@ -44,6 +46,7 @@ export class ConnectionResolver extends Context.Service<
 
 const isBearerProfile = Schema.is(BearerConnectionProfile);
 const isSshProfile = Schema.is(SshConnectionProfile);
+const isCloudSandboxProfile = Schema.is(CloudSandboxConnectionProfile);
 const isBearerCredential = Schema.is(BearerConnectionCredential);
 
 function primarySocketUrl(target: PrimaryConnectionTarget): string {
@@ -241,11 +244,63 @@ const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(funct
   });
 });
 
+const makeCloudSandboxBroker = Effect.fn("clientRuntime.connection.broker.makeCloudSandbox")(
+  function* () {
+    const cloud = yield* ClientCapabilities.CloudSandboxEnvironmentGateway;
+    const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+
+    return Effect.fn("clientRuntime.connection.broker.cloudSandbox")(function* (
+      entry: ConnectionCatalogEntry & { readonly target: CloudSandboxConnectionTarget },
+    ) {
+      const target = entry.target;
+      const profile = yield* Option.match(entry.profile, {
+        onNone: () => Effect.fail(profileMissingError(target.connectionId)),
+        onSome: Effect.succeed,
+      });
+      if (!isCloudSandboxProfile(profile)) {
+        return yield* new ConnectionBlockedError({
+          reason: "configuration",
+          detail: `Connection profile ${target.connectionId} is not a cloud sandbox connection.`,
+        });
+      }
+      if (profile.environmentId !== target.environmentId) {
+        return yield* environmentMismatchError({
+          expected: target.environmentId,
+          actual: profile.environmentId,
+        });
+      }
+      const prepared = yield* cloud.prepare({
+        connectionId: target.connectionId,
+        expectedEnvironmentId: target.environmentId,
+        target: profile.target,
+      });
+      const authorized = yield* remote.authorizeBearer({
+        expectedEnvironmentId: target.environmentId,
+        httpBaseUrl: prepared.bootstrap.httpBaseUrl,
+        wsBaseUrl: prepared.bootstrap.wsBaseUrl,
+        bearerToken: prepared.bearerToken,
+      });
+      return {
+        environmentId: authorized.environmentId,
+        label: authorized.label,
+        httpBaseUrl: authorized.httpBaseUrl,
+        socketUrl: authorized.socketUrl,
+        httpAuthorization: authorized.httpAuthorization,
+        target,
+      } satisfies PreparedConnection;
+    });
+  },
+);
+
 export const make = Effect.gen(function* () {
   const primary = yield* makePrimaryBroker();
   const bearer = yield* makeBearerBroker();
   const relay = yield* makeRelayBroker();
   const ssh = yield* makeSshBroker();
+  const cloudSandbox = yield* makeCloudSandboxBroker();
+  const sourceControlCredentials = yield* Effect.serviceOption(
+    ClientCapabilities.SourceControlCredentialGateway,
+  );
 
   const prepare = Effect.fn("clientRuntime.connection.broker.prepare")(function* (
     entry: ConnectionCatalogEntry,
@@ -255,16 +310,24 @@ export const make = Effect.gen(function* () {
       "connection.environment.id": target.environmentId,
       "connection.target.kind": target._tag,
     });
-    switch (target._tag) {
-      case "PrimaryConnectionTarget":
-        return yield* primary(target);
-      case "BearerConnectionTarget":
-        return yield* bearer({ ...entry, target });
-      case "RelayConnectionTarget":
-        return yield* relay(target);
-      case "SshConnectionTarget":
-        return yield* ssh({ ...entry, target });
+    const prepared = yield* (() => {
+      switch (target._tag) {
+        case "PrimaryConnectionTarget":
+          return primary(target);
+        case "BearerConnectionTarget":
+          return bearer({ ...entry, target });
+        case "RelayConnectionTarget":
+          return relay(target);
+        case "SshConnectionTarget":
+          return ssh({ ...entry, target });
+        case "CloudSandboxConnectionTarget":
+          return cloudSandbox({ ...entry, target });
+      }
+    })();
+    if (Option.isSome(sourceControlCredentials)) {
+      yield* sourceControlCredentials.value.sync(prepared);
     }
+    return prepared;
   });
 
   return ConnectionResolver.of({ prepare });

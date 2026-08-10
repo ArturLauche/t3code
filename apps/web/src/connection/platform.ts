@@ -1,11 +1,13 @@
 import {
   ClientPresentation,
   CloudSession,
+  CloudSandboxEnvironmentGateway,
   EnvironmentOwnedDataCleanup,
   PlatformConnectionSource,
   PrimaryEnvironmentAuth,
   RelayDeviceIdentity,
   SshEnvironmentGateway,
+  SourceControlCredentialGateway,
 } from "@t3tools/client-runtime/platform";
 import {
   BearerConnectionCredential,
@@ -29,6 +31,7 @@ import {
   AuthStandardClientScopes,
   type DesktopBridge,
   type DesktopEnvironmentBootstrap,
+  type DesktopCloudSandboxTarget,
   type DesktopSshEnvironmentTarget,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
@@ -136,6 +139,35 @@ function sshPreparationError(cause: unknown) {
     detail: `Could not prepare the SSH environment: ${message}`,
   });
 }
+
+function cloudSandboxPreparationError(cause: unknown) {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return new ConnectionTransientError({
+    reason: "remote-unavailable",
+    detail: `Could not prepare the cloud sandbox: ${message}`,
+  });
+}
+
+export const provisionDesktopCloudSandbox = Effect.fn(
+  "web.connectionPlatform.cloudSandbox.provisionDesktop",
+)(function* (bridge: DesktopBridge, target: DesktopCloudSandboxTarget) {
+  const bootstrap = yield* Effect.tryPromise({
+    try: () => bridge.ensureCloudSandbox({ target, issuePairingToken: true }),
+    catch: cloudSandboxPreparationError,
+  });
+  if (bootstrap.bearerToken === null) {
+    return yield* new ConnectionBlockedError({
+      reason: "authentication",
+      detail: "The cloud sandbox did not issue an environment credential.",
+    });
+  }
+  return {
+    environmentId: bootstrap.environmentId,
+    label: bootstrap.label,
+    bootstrap,
+    bearerToken: bootstrap.bearerToken,
+  };
+});
 
 export const provisionDesktopSshEnvironment = Effect.fn(
   "web.connectionPlatform.ssh.provisionDesktop",
@@ -273,12 +305,84 @@ const capabilitiesLayer = Layer.effectContext(
         });
       }),
     });
+    const cloudSandbox = CloudSandboxEnvironmentGateway.of({
+      provision: Effect.fn("web.connectionPlatform.cloudSandbox.provision")(function* (target) {
+        const bridge = window.desktopBridge;
+        if (bridge === undefined) {
+          return yield* new ConnectionBlockedError({
+            reason: "unsupported",
+            detail: "Cloud sandboxes are only available in the desktop app.",
+          });
+        }
+        return yield* provisionDesktopCloudSandbox(bridge, target);
+      }),
+      prepare: Effect.fn("web.connectionPlatform.cloudSandbox.prepare")(function* (input) {
+        const bridge = window.desktopBridge;
+        if (bridge === undefined) {
+          return yield* new ConnectionBlockedError({
+            reason: "unsupported",
+            detail: "Cloud sandboxes are only available in the desktop app.",
+          });
+        }
+        const provisioned = yield* provisionDesktopCloudSandbox(bridge, input.target);
+        if (provisioned.environmentId !== input.expectedEnvironmentId) {
+          return yield* new ConnectionBlockedError({
+            reason: "configuration",
+            detail: `Cloud sandbox environment mismatch: expected ${input.expectedEnvironmentId}, received ${provisioned.environmentId}.`,
+          });
+        }
+        return {
+          bootstrap: provisioned.bootstrap,
+          bearerToken: provisioned.bearerToken,
+        };
+      }),
+      disconnect: Effect.fn("web.connectionPlatform.cloudSandbox.disconnect")(function* (target) {
+        const bridge = window.desktopBridge;
+        if (bridge === undefined) return;
+        yield* Effect.tryPromise({
+          try: () => bridge.disconnectCloudSandbox(target),
+          catch: cloudSandboxPreparationError,
+        });
+      }),
+    });
+    const sourceControlCredentials = SourceControlCredentialGateway.of({
+      sync: Effect.fn("web.connectionPlatform.sourceControl.syncCredential")(
+        function* (connection) {
+          const bridge = window.desktopBridge;
+          if (bridge === undefined) return;
+          const environmentAccessToken =
+            connection.httpAuthorization?._tag === "Bearer"
+              ? connection.httpAuthorization.token
+              : connection.target._tag === "PrimaryConnectionTarget"
+                ? yield* Effect.tryPromise({
+                    try: () => bridge.getLocalEnvironmentBearerToken(),
+                    catch: cloudSandboxPreparationError,
+                  })
+                : null;
+          if (environmentAccessToken === null) return;
+          yield* Effect.tryPromise({
+            try: () =>
+              bridge.syncGitHubCredential({
+                httpBaseUrl: connection.httpBaseUrl,
+                environmentAccessToken,
+              }),
+            catch: (cause) =>
+              new ConnectionTransientError({
+                reason: "remote-unavailable",
+                detail: `Could not synchronize the GitHub credential: ${cause instanceof Error ? cause.message : String(cause)}`,
+              }),
+          });
+        },
+      ),
+    });
 
     return Context.make(CloudSession, cloudSession).pipe(
       Context.add(PrimaryEnvironmentAuth, primaryAuth),
       Context.add(RelayDeviceIdentity, identity),
       Context.add(ClientPresentation, presentation),
       Context.add(SshEnvironmentGateway, ssh),
+      Context.add(CloudSandboxEnvironmentGateway, cloudSandbox),
+      Context.add(SourceControlCredentialGateway, sourceControlCredentials),
     );
   }),
 );

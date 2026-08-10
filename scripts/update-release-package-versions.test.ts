@@ -162,15 +162,25 @@ it.layer(ScriptTestLayer)("update-release-package-versions", (it) => {
       const filePath = path.join(baseDir, releasePackageFiles[0]);
 
       yield* writePackageJsonFixtures(baseDir, "0.0.1");
-      yield* fs.chmod(filePath, 0o400);
+      const cause = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "writeFileString",
+        pathOrDescriptor: filePath,
+      });
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        writeFileString: (target, content, options) =>
+          target === filePath ? Effect.fail(cause) : fs.writeFileString(target, content, options),
+      });
 
       const error = yield* updateReleasePackageVersions("1.2.3", {
         rootDir: baseDir,
-      }).pipe(Effect.flip, Effect.ensuring(fs.chmod(filePath, 0o600).pipe(Effect.orDie)));
+      }).pipe(Effect.provideService(FileSystem.FileSystem, failingFileSystem), Effect.flip);
 
       assert.equal(error.operation, "write");
       assert.equal(error.filePath, filePath);
-      assert.instanceOf(error.cause, PlatformError.PlatformError);
+      assert.strictEqual(error.cause, cause);
       assert.equal(error.message, `Failed to write release package manifest '${filePath}'.`);
     }),
   );

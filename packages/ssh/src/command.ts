@@ -161,9 +161,23 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
   return {
     alias: target.alias,
     hostname: target.hostname,
-    username: target.username,
+    hasUsername: target.username !== null,
     port: target.port,
   };
+}
+
+export function usesEphemeralUsernameCredential(target: DesktopSshEnvironmentTarget): boolean {
+  return target.hostname === "ssh.app.daytona.io" && target.username !== null;
+}
+
+function redactSshCommandForLogs(
+  target: DesktopSshEnvironmentTarget,
+  command: readonly string[],
+): string[] {
+  if (!usesEphemeralUsernameCredential(target) || target.username === null) {
+    return [...command];
+  }
+  return command.map((part) => part.replaceAll(target.username!, "[redacted-ssh-credential]"));
 }
 
 function stdinStream(input: string | undefined) {
@@ -205,9 +219,10 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   ];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const sshCommand = yield* resolveSshCommand;
+  const logCommand = redactSshCommandForLogs(target, [sshCommand, ...args]);
   yield* Effect.logDebug("ssh.command.start", {
     ...sshTargetLogFields(target),
-    command: [sshCommand, ...args],
+    command: logCommand,
     hasStdin: input.stdin !== undefined,
     timeoutMs: input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS,
   });
@@ -227,7 +242,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
       Effect.mapError(
         (cause) =>
           new SshCommandError({
-            command: [sshCommand, ...args],
+            command: logCommand,
             exitCode: null,
             stderr: "",
             message:

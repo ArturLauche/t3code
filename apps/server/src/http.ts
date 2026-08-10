@@ -3,6 +3,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
+  GitHubCredentialInjectionInput,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
@@ -12,6 +13,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -38,11 +40,13 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as GitHubCredentialBroker from "./sourceControl/GitHubCredentialBroker.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
+const decodeGitHubCredentialInjection = Schema.decodeUnknownEffect(GitHubCredentialInjectionInput);
 export const httpCompressionLayer = HttpRouter.middleware(HttpMiddleware.compression(), {
   global: true,
 });
@@ -173,6 +177,54 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           HttpServerResponse.text("Trace export failed.", { status: 502 }),
         ),
       );
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+export const githubCredentialInjectionRouteLayer = HttpRouter.add(
+  "PUT",
+  "/api/source-control/github/credential",
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const decoded = yield* decodeGitHubCredentialInjection(yield* request.json).pipe(Effect.option);
+    if (Option.isNone(decoded)) {
+      return HttpServerResponse.text("Invalid credential request.", { status: 400 });
+    }
+    const broker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
+    if (Option.isNone(broker)) {
+      return HttpServerResponse.text("GitHub integration is unavailable.", { status: 503 });
+    }
+    yield* broker.value.injectEphemeral({
+      token: decoded.value.token,
+      ...(decoded.value.ttlSeconds === undefined ? {} : { ttlSeconds: decoded.value.ttlSeconds }),
+    });
+    return HttpServerResponse.empty({ status: 204 });
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+export const githubCredentialRemovalRouteLayer = HttpRouter.add(
+  "DELETE",
+  "/api/source-control/github/credential",
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const broker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
+    if (Option.isNone(broker)) {
+      return HttpServerResponse.text("GitHub integration is unavailable.", { status: 503 });
+    }
+    yield* broker.value.clearEphemeral;
+    return HttpServerResponse.empty({ status: 204 });
   }).pipe(
     Effect.catchTags({
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,

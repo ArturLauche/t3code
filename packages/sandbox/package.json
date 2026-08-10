@@ -1,0 +1,26 @@
+{
+  "name": "@t3tools/sandbox",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@daytona/sdk": "0.203.0",
+    "@t3tools/contracts": "workspace:*",
+    "e2b": "2.38.2",
+    "novita-sandbox": "2.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

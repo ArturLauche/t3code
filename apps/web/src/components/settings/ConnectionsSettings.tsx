@@ -86,6 +86,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { Textarea } from "../ui/textarea";
+import { CloudSandboxesSettingsSection } from "./CloudSandboxesSettings";
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "../../pairingUrl";
 import { readHostedPairingRequest } from "../../hostedPairing";
 import {
@@ -1745,7 +1746,11 @@ export function ConnectionsSettings() {
   const savedEnvironments = useMemo(
     () =>
       environments
-        .filter((environment) => environment.entry.target._tag !== "PrimaryConnectionTarget")
+        .filter(
+          (environment) =>
+            environment.entry.target._tag !== "PrimaryConnectionTarget" &&
+            environment.entry.target._tag !== "CloudSandboxConnectionTarget",
+        )
         .toSorted((left, right) => left.label.localeCompare(right.label)),
     [environments],
   );
@@ -3431,6 +3436,7 @@ export function ConnectionsSettings() {
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <CloudSandboxesSettingsSection />
     </SettingsPageContainer>
   );
 }

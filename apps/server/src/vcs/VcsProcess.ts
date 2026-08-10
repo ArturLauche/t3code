@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -16,6 +17,7 @@ import {
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as GitHubCredentialBroker from "../sourceControl/GitHubCredentialBroker.ts";
 
 export interface VcsProcessInput {
   readonly operation: string;
@@ -88,8 +90,19 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
 
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const githubBroker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
 
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
+    const githubEnvironment =
+      (input.command === "git" || input.command === "gh") && Option.isSome(githubBroker)
+        ? yield* githubBroker.value.processEnvironment.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                operation: error.operation,
+              }).pipe(Effect.as(Option.none<NodeJS.ProcessEnv>())),
+            ),
+          )
+        : Option.none<NodeJS.ProcessEnv>();
     const baseError = {
       operation: input.operation,
       command: input.command,
@@ -104,7 +117,14 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
+        ...(input.env !== undefined || Option.isSome(githubEnvironment)
+          ? {
+              env: {
+                ...input.env,
+                ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
+              },
+            }
+          : {}),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: "truncate",

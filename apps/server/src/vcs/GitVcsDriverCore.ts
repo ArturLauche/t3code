@@ -37,6 +37,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import * as GitHubCredentialBroker from "../sourceControl/GitHubCredentialBroker.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -704,6 +705,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
+  const githubBroker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
@@ -716,6 +718,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const appendTruncationMarker = input.appendTruncationMarker ?? false;
 
       const runGitCommand = Effect.fn("runGitCommand")(function* () {
+        const githubEnvironment = Option.isSome(githubBroker)
+          ? yield* githubBroker.value.processEnvironment.pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                  operation: error.operation,
+                }).pipe(Effect.as(Option.none<NodeJS.ProcessEnv>())),
+              ),
+            )
+          : Option.none<NodeJS.ProcessEnv>();
         const trace2Monitor = yield* createTrace2Monitor(commandInput, input.progress).pipe(
           Effect.provideService(Path.Path, path),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -735,6 +746,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               env: {
                 ...process.env,
                 ...input.env,
+                ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
                 ...trace2Monitor.env,
               },
             }),

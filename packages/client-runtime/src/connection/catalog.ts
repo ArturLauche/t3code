@@ -1,9 +1,14 @@
-import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@t3tools/contracts";
+import {
+  DesktopCloudSandboxTargetSchema,
+  DesktopSshEnvironmentTargetSchema,
+  EnvironmentId,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
   BearerConnectionTarget,
+  CloudSandboxConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
@@ -33,7 +38,19 @@ export class SshConnectionProfile extends Schema.TaggedClass<SshConnectionProfil
   },
 ) {}
 
-export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile]);
+export class CloudSandboxConnectionProfile extends Schema.TaggedClass<CloudSandboxConnectionProfile>()(
+  "CloudSandboxConnectionProfile",
+  {
+    ...ConnectionProfileBase,
+    target: DesktopCloudSandboxTargetSchema,
+  },
+) {}
+
+export const ConnectionProfile = Schema.Union([
+  BearerConnectionProfile,
+  SshConnectionProfile,
+  CloudSandboxConnectionProfile,
+]);
 export type ConnectionProfile = typeof ConnectionProfile.Type;
 
 export interface ConnectionCatalogEntry {
@@ -82,10 +99,19 @@ export class SshConnectionRegistration extends Schema.TaggedClass<SshConnectionR
   },
 ) {}
 
+export class CloudSandboxConnectionRegistration extends Schema.TaggedClass<CloudSandboxConnectionRegistration>()(
+  "CloudSandboxConnectionRegistration",
+  {
+    target: CloudSandboxConnectionTarget,
+    profile: CloudSandboxConnectionProfile,
+  },
+) {}
+
 export const ConnectionRegistration = Schema.Union([
   RelayConnectionRegistration,
   BearerConnectionRegistration,
   SshConnectionRegistration,
+  CloudSandboxConnectionRegistration,
 ]);
 export type ConnectionRegistration = typeof ConnectionRegistration.Type;
 
@@ -122,6 +148,7 @@ export function connectionRegistrationCatalogEntry(
       };
     case "BearerConnectionRegistration":
     case "SshConnectionRegistration":
+    case "CloudSandboxConnectionRegistration":
       return {
         target: registration.target,
         profile: Option.some(registration.profile),
