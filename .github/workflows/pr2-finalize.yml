@@ -36,7 +36,7 @@ jobs:
           python scripts/pr2-final-type.py
 
       - name: Remove temporary source patches
-        run: git rm scripts/pr2-final-source.py scripts/fix-pr2-runner.py scripts/pr2-final-post.py scripts/pr2-final-type.py
+        run: git rm -f scripts/pr2-final-source.py scripts/fix-pr2-runner.py scripts/pr2-final-post.py scripts/pr2-final-type.py
 
       - name: Commit source fixes
         shell: bash
@@ -53,4 +53,4 @@ jobs:
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
             push origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: unauthenticated source application checkout
+# trigger: remove modified helper scripts after application
