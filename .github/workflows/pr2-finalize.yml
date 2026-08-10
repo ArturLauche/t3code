@@ -27,7 +27,9 @@ jobs:
           run-install: true
 
       - name: Apply remaining source review fixes
-        run: python scripts/pr2-final-source.py
+        run: |
+          python scripts/fix-pr2-runner.py
+          python scripts/pr2-final-source.py
 
       - name: Format
         run: vp fmt
@@ -44,8 +46,8 @@ jobs:
       - name: Release smoke
         run: vp run release:smoke
 
-      - name: Remove temporary source patch
-        run: git rm scripts/pr2-final-source.py
+      - name: Remove temporary source patches
+        run: git rm scripts/pr2-final-source.py scripts/fix-pr2-runner.py
 
       - name: Commit validated source fixes
         shell: bash
