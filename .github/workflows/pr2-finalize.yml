@@ -13,7 +13,7 @@ permissions:
 jobs:
   finalize:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -26,18 +26,28 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Apply remaining mechanical review fixes
-        run: python scripts/pr2-finalize.py
+      - name: Apply remaining source review fixes
+        run: python scripts/pr2-final-source.py
 
-      - name: Format changed sources
+      - name: Format
         run: vp fmt
 
-      - name: Keep workflow-file changes for connector cleanup
-        run: |
-          git restore .github/workflows/build-fork.yml .github/workflows/ci.yml
-          git rm scripts/pr2-finalize.py
+      - name: Static checks
+        run: vp check
 
-      - name: Commit review fixes
+      - name: Typecheck
+        run: vpr typecheck
+
+      - name: Tests
+        run: vp test
+
+      - name: Release smoke
+        run: vp run release:smoke
+
+      - name: Remove temporary source patch
+        run: git rm scripts/pr2-final-source.py
+
+      - name: Commit validated source fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -45,5 +55,5 @@ jobs:
           git config user.email "118263652+ArturLauche@users.noreply.github.com"
           git add -u
           git diff --cached --check
-          git commit -m "fix: address remaining cross-package review findings"
+          git commit -m "fix: close remaining PR review findings"
           git push origin HEAD:agent/execution-environments-github-sandboxes
