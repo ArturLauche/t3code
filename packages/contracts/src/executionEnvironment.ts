@@ -22,6 +22,7 @@ export type ExecutionEnvironmentCategory = typeof ExecutionEnvironmentCategory.T
 export const ExecutionEnvironmentOperationCapabilities = Schema.Struct({
   create: Schema.Boolean,
   connect: Schema.Boolean,
+  start: Schema.Boolean,
   status: Schema.Boolean,
   bootstrap: Schema.Boolean,
   commandExecution: Schema.Boolean,
@@ -141,7 +142,7 @@ export const DaytonaSandboxCreateInput = Schema.Struct({
   diskGiB: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThan(0))),
   autoStopMinutes: Schema.optionalKey(NonNegativeInt),
   autoPauseMinutes: Schema.optionalKey(NonNegativeInt),
-  autoDeleteMinutes: Schema.optionalKey(Schema.Int),
+  autoDeleteMinutes: Schema.optionalKey(NonNegativeInt),
   ttlMinutes: Schema.optionalKey(NonNegativeInt),
 });
 export type DaytonaSandboxCreateInput = typeof DaytonaSandboxCreateInput.Type;

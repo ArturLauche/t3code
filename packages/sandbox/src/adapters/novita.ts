@@ -34,7 +34,7 @@ export function toRecord(connectionId: string, info: SandboxInfo): CloudSandboxR
     sandboxId: info.sandboxId,
     name: info.name ?? info.metadata["t3-name"] ?? info.sandboxId,
     status: info.state,
-    template: info.name ?? info.templateId,
+    template: info.templateId,
     resources: {
       cpu: info.cpuCount,
       memoryMiB: info.memoryMB,
@@ -50,7 +50,7 @@ export function toRecord(connectionId: string, info: SandboxInfo): CloudSandboxR
     persistent: info.lifecycle?.onTimeout === "pause",
     associatedProject: null,
     createdAt: info.startedAt.toISOString(),
-    updatedAt: info.endAt.toISOString(),
+    updatedAt: new Date().toISOString(),
     lifecycle,
   };
 }
@@ -59,7 +59,7 @@ export function createOptions(
   credential: SandboxProviderCredential,
   input: NovitaSandboxCreateInput,
 ) {
-  const timeoutAction = input.ephemeral ? "kill" : (input.timeoutAction ?? "pause");
+  const timeoutAction = input.ephemeral ? "delete" : (input.timeoutAction ?? "pause");
   return {
     ...options(credential),
     timeoutMs: (input.timeoutMinutes ?? 60) * 60_000,
@@ -91,10 +91,18 @@ export function makeNovitaSandboxProvider(input: {
   const getInfo = (sandboxId: string) => Sandbox.getInfo(sandboxId, options(input.credential));
   const get = (sandboxId: string) =>
     safely("get", async () => toRecord(input.connectionId, await getInfo(sandboxId)));
-  const connectInstance = (sandboxId: string, timeoutMs?: number) =>
+  const remainingTimeoutMs = async (sandboxId: string) => {
+    const info = await getInfo(sandboxId);
+    const remaining = info.endAt.getTime() - new Date().getTime();
+    if (!Number.isFinite(remaining) || remaining <= 0) {
+      throw new Error(`Sandbox ${sandboxId} has reached its configured timeout.`);
+    }
+    return Math.max(1, Math.floor(remaining));
+  };
+  const connectInstance = async (sandboxId: string) =>
     Sandbox.connect(sandboxId, {
       ...options(input.credential),
-      ...(timeoutMs ? { timeoutMs } : {}),
+      timeoutMs: await remainingTimeoutMs(sandboxId),
     });
 
   return {
@@ -132,19 +140,22 @@ export function makeNovitaSandboxProvider(input: {
           : await Sandbox.create(create);
         return toRecord(input.connectionId, await sandbox.getInfo());
       }),
-    connect: async (sandboxId) => {
-      const sandbox = await safely("connect", () => connectInstance(sandboxId));
-      return toRecord(input.connectionId, await sandbox.getInfo());
-    },
-    pause: async (sandboxId) => {
-      const sandbox = await safely("pause", () => connectInstance(sandboxId));
-      await safely("pause", () => sandbox.pause());
-      return get(sandboxId);
-    },
-    resume: async (sandboxId) => {
-      const sandbox = await safely("resume", () => connectInstance(sandboxId));
-      return toRecord(input.connectionId, await sandbox.getInfo());
-    },
+    connect: (sandboxId) =>
+      safely("connect", async () => {
+        const sandbox = await connectInstance(sandboxId);
+        return toRecord(input.connectionId, await sandbox.getInfo());
+      }),
+    pause: (sandboxId) =>
+      safely("pause", async () => {
+        const sandbox = await connectInstance(sandboxId);
+        await sandbox.pause();
+        return toRecord(input.connectionId, await getInfo(sandboxId));
+      }),
+    resume: (sandboxId) =>
+      safely("resume", async () => {
+        const sandbox = await connectInstance(sandboxId);
+        return toRecord(input.connectionId, await sandbox.getInfo());
+      }),
     delete: (sandboxId) =>
       safely("delete", () => Sandbox.kill(sandboxId, options(input.credential))).then(
         () => undefined,

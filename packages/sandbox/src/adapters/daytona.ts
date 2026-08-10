@@ -52,6 +52,19 @@ export function daytonaStatus(state: string | undefined): CloudSandboxRecord["st
 export function toRecord(connectionId: string, sandbox: Sandbox): CloudSandboxRecord {
   const createdAt = sandbox.createdAt ?? sandbox.updatedAt ?? "1970-01-01T00:00:00.000Z";
   const updatedAt = sandbox.updatedAt ?? createdAt;
+  const automaticShutdown =
+    sandbox.autoDeleteInterval !== undefined && sandbox.autoDeleteInterval >= 0
+      ? {
+          action: "delete" as const,
+          ...(sandbox.autoDeleteInterval > 0
+            ? { timeoutMinutes: sandbox.autoDeleteInterval }
+            : {}),
+        }
+      : sandbox.autoPauseInterval !== undefined && sandbox.autoPauseInterval > 0
+        ? { action: "pause" as const, timeoutMinutes: sandbox.autoPauseInterval }
+        : sandbox.autoStopInterval !== undefined && sandbox.autoStopInterval > 0
+          ? { action: "stop" as const, timeoutMinutes: sandbox.autoStopInterval }
+          : {};
   return {
     providerConnectionId: connectionId as CloudSandboxRecord["providerConnectionId"],
     provider: "daytona",
@@ -65,24 +78,7 @@ export function toRecord(connectionId: string, sandbox: Sandbox): CloudSandboxRe
       memoryMiB: Math.round(sandbox.memory * 1024),
       diskGiB: sandbox.disk,
     },
-    automaticShutdown: {
-      ...(sandbox.autoDeleteInterval !== undefined && sandbox.autoDeleteInterval > 0
-        ? { timeoutMinutes: sandbox.autoDeleteInterval }
-        : {}),
-      ...(sandbox.autoStopInterval !== undefined && sandbox.autoStopInterval > 0
-        ? { timeoutMinutes: sandbox.autoStopInterval }
-        : {}),
-      ...(sandbox.autoPauseInterval !== undefined && sandbox.autoPauseInterval > 0
-        ? { timeoutMinutes: sandbox.autoPauseInterval }
-        : {}),
-      ...(sandbox.autoDeleteInterval !== undefined && sandbox.autoDeleteInterval >= 0
-        ? { action: "delete" as const }
-        : sandbox.autoPauseInterval !== undefined && sandbox.autoPauseInterval > 0
-          ? { action: "pause" as const }
-          : sandbox.autoStopInterval !== undefined && sandbox.autoStopInterval > 0
-            ? { action: "stop" as const }
-            : {}),
-    },
+    automaticShutdown,
     // Daytona uses a negative value (or omission) to disable deletion; zero
     // means an ephemeral sandbox that is deleted as soon as it stops.
     persistent: sandbox.autoDeleteInterval === undefined || sandbox.autoDeleteInterval < 0,
