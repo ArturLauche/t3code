@@ -71,15 +71,18 @@ replace_once(
 
 command_palette = Path("apps/web/src/components/CommandPalette.tsx")
 text = command_palette.read_text()
-marker = "  const startAddProjectSourceSelection = useCallback("
-if text.count(marker) != 1:
-    raise RuntimeError(f"Command Palette marker count was {text.count(marker)}")
-prefix, suffix = text.split(marker, 1)
+start_marker = "  const startAddProjectSourceSelection = useCallback("
+end_marker = "  const addProjectEnvironmentItems: CommandPaletteActionItem[] ="
+if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+    raise RuntimeError("Command Palette source-selection markers are not unique")
+prefix, remainder = text.split(start_marker, 1)
+section, suffix = remainder.split(end_marker, 1)
 old_guard = '''      if (!canCreateProjectInEnvironment(environment?.connection.phase)) {'''
 new_guard = '''      if (
         environment === undefined ||
         !canCreateProjectInEnvironment(environment.connection.phase)
       ) {'''
-if suffix.count(old_guard) != 1:
-    raise RuntimeError(f"Scoped environment guard count was {suffix.count(old_guard)}")
-command_palette.write_text(prefix + marker + suffix.replace(old_guard, new_guard, 1))
+if section.count(old_guard) != 1:
+    raise RuntimeError(f"Scoped environment guard count was {section.count(old_guard)}")
+section = section.replace(old_guard, new_guard, 1)
+command_palette.write_text(prefix + start_marker + section + end_marker + suffix)
