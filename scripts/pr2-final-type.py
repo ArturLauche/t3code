@@ -52,7 +52,6 @@ replace_once(
     '''      rejectVerification?.(error);''',
     '''      verification.reject(error);''',
 )
-
 replace_once(
     "packages/github/src/deviceFlow.test.ts",
     '''    let verify: ((value: unknown) => void) | null = null;
@@ -68,4 +67,12 @@ replace_once(
     "packages/github/src/deviceFlow.test.ts",
     '''    verify?.({''',
     '''    verification.current?.({''',
+)
+replace_once(
+    "apps/web/src/components/CommandPalette.tsx",
+    '''      if (!canCreateProjectInEnvironment(environment?.connection.phase)) {''',
+    '''      if (
+        environment === undefined ||
+        !canCreateProjectInEnvironment(environment.connection.phase)
+      ) {''',
 )
