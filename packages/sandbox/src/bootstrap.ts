@@ -52,7 +52,7 @@ fi
 READY=0
 COUNT=0
 while [ "$COUNT" -lt 120 ]; do
-  if command -v curl >/dev/null 2>&1 && curl --silent --max-time 1 -o /dev/null "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+  if command -v curl >/dev/null 2>&1 && curl --silent --fail --max-time 1 -o /dev/null "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
     READY=1
     break
   fi

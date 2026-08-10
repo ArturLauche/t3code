@@ -35,6 +35,8 @@ export function mergeGitHubGitEnvironment(
   brokerEnvironment: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const hooksPath = brokerEnvironment[BROKER_HOOKS_PATH_KEY];
+  // Caller values intentionally win: unattended fetches pass GIT_ASKPASS="" and
+  // must be able to suppress broker credential prompting.
   const merged = { ...brokerEnvironment, ...baseEnvironment };
   delete merged[BROKER_HOOKS_PATH_KEY];
   if (!hooksPath) return merged;

@@ -34,6 +34,7 @@ export class GitHubDeviceFlow {
   private pending: PendingDeviceFlow | null = null;
   private starting: Promise<GitHubDeviceFlowAuthorization> | null = null;
   private lastError: unknown | null = null;
+  private generation = 0;
   private readonly options: GitHubDeviceFlowOptions;
 
   constructor(options: GitHubDeviceFlowOptions) {
@@ -50,11 +51,15 @@ export class GitHubDeviceFlow {
 
     this.pending = null;
     this.lastError = null;
+    const generation = ++this.generation;
     let verificationReceived = false;
     const verification = Promise.withResolvers<Verification>();
 
     let authentication: Promise<OAuthAppAuthentication>;
     const starting = verification.promise.then((value) => {
+      if (generation !== this.generation) {
+        throw new Error("GitHub device authorization was cancelled.");
+      }
       const authorization = {
         userCode: value.user_code,
         verificationUri: value.verification_uri,
@@ -108,9 +113,10 @@ export class GitHubDeviceFlow {
 
     void starting.then(
       () => {
-        if (this.starting === starting) this.starting = null;
+        if (generation === this.generation && this.starting === starting) this.starting = null;
       },
       (error: unknown) => {
+        if (generation !== this.generation) return;
         if (this.starting === starting) this.starting = null;
         this.lastError = error;
       },
@@ -128,6 +134,7 @@ export class GitHubDeviceFlow {
   }
 
   clear(): void {
+    this.generation += 1;
     this.pending = null;
     this.starting = null;
     this.lastError = null;

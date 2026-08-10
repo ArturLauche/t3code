@@ -206,7 +206,7 @@ function CreateSandboxDialog({
 
   const create = async () => {
     if (!bridge || !selected) return;
-    const timeout = Number.parseInt(timeoutMinutes, 10);
+    const timeout = Number(timeoutMinutes);
     if (!Number.isInteger(timeout) || timeout <= 0) {
       setError("Automatic timeout must be a positive whole number of minutes.");
       return;

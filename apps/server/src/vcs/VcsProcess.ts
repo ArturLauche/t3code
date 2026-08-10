@@ -92,17 +92,24 @@ export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const githubBroker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
 
-  const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
-    const githubLease =
-      Option.isSome(githubBroker) && input.command === "git"
-        ? yield* githubBroker.value.gitProcessEnvironment.pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
-                operation: error.operation,
-              }).pipe(Effect.as(Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>())),
-            ),
-          )
-        : Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>();
+  const run = Effect.fn("VcsProcess.run")((input: VcsProcessInput) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const githubLease =
+          Option.isSome(githubBroker) && input.command === "git"
+            ? yield* Effect.acquireRelease(
+                githubBroker.value.gitProcessEnvironment.pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                      operation: error.operation,
+                    }).pipe(
+                      Effect.as(Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>()),
+                    ),
+                  ),
+                ),
+                (lease) => (Option.isSome(lease) ? lease.value.release : Effect.void),
+              )
+            : Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>();
     const githubCliEnvironment =
       Option.isSome(githubBroker) && input.command === "gh"
         ? yield* githubBroker.value.cliEnvironment.pipe(
@@ -146,7 +153,6 @@ export const make = Effect.gen(function* () {
         timeoutBehavior: "error",
       })
       .pipe(
-        Option.isSome(githubLease) ? Effect.ensuring(githubLease.value.release) : (effect) => effect,
         Effect.mapError(
           Match.valueTags({
             ProcessSpawnError: (error) =>
@@ -192,14 +198,16 @@ export const make = Effect.gen(function* () {
       );
     }
 
-    return {
-      exitCode: result.code,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      stdoutTruncated: result.stdoutTruncated,
-      stderrTruncated: result.stderrTruncated,
-    } satisfies VcsProcessOutput;
-  });
+        return {
+          exitCode: result.code,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          stdoutTruncated: result.stdoutTruncated,
+          stderrTruncated: result.stderrTruncated,
+        } satisfies VcsProcessOutput;
+      }),
+    ),
+  );
 
   return VcsProcess.of({ run });
 });

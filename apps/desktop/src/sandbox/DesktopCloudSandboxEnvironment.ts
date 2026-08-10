@@ -180,6 +180,8 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
         Effect.ignore,
         Effect.andThen(Effect.tryPromise(() => transport.access.revoke()).pipe(Effect.ignore)),
       );
+    const revokeAccess = (transport: DaytonaTransport) =>
+      Effect.tryPromise(() => transport.access.revoke()).pipe(Effect.ignore);
     const now = yield* Clock.currentTimeMillis;
     const active = (yield* Ref.get(daytonaTransports)).get(key);
     let transport = active && isUsable(active, now) ? active : undefined;
@@ -209,7 +211,7 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
         next.set(key, candidate);
         return [{ winner: candidate, loser: null, stale: existing ?? null }, next] as const;
       });
-      if (decision.loser) yield* cleanupTransport(decision.loser);
+      if (decision.loser) yield* revokeAccess(decision.loser);
       if (decision.stale) yield* cleanupTransport(decision.stale);
       transport = decision.winner;
     }

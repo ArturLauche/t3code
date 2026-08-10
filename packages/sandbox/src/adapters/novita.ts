@@ -70,7 +70,6 @@ export function createOptions(
   return {
     ...options(credential),
     timeoutMs,
-    secure: false,
     metadata: {
       "t3-code": "true",
       ...(input.name ? { "t3-name": input.name } : {}),
