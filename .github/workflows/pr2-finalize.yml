@@ -19,11 +19,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          ref: agent/execution-environments-github-sandboxes
-          fetch-depth: 0
-          persist-credentials: false
+      - name: Checkout branch without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/${{ github.repository }}.git
+          git fetch --depth=1 origin agent/execution-environments-github-sandboxes
+          git checkout --detach FETCH_HEAD
 
       - name: Apply remaining source review fixes
         run: |
@@ -50,4 +53,4 @@ jobs:
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
             push origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: securely apply accumulated source fixes
+# trigger: unauthenticated source application checkout
