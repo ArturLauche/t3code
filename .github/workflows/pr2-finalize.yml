@@ -28,15 +28,11 @@ jobs:
           git fetch --depth=1 origin agent/execution-environments-github-sandboxes
           git checkout --detach FETCH_HEAD
 
-      - name: Apply remaining source review fixes
-        run: |
-          python scripts/fix-pr2-runner.py
-          python scripts/pr2-final-source.py
-          python scripts/pr2-final-post.py
-          python scripts/pr2-final-type.py
+      - name: Apply final live review fixes
+        run: python scripts/pr2-last-pass.py
 
-      - name: Remove temporary source patches
-        run: git rm -f scripts/pr2-final-source.py scripts/fix-pr2-runner.py scripts/pr2-final-post.py scripts/pr2-final-type.py
+      - name: Remove temporary patch
+        run: git rm -f scripts/pr2-last-pass.py
 
       - name: Commit source fixes
         shell: bash
@@ -48,9 +44,9 @@ jobs:
           git config user.email "118263652+ArturLauche@users.noreply.github.com"
           git add -u
           git diff --cached --check
-          git commit -m "fix: close remaining PR review findings"
+          git commit -m "fix: address final PR review findings"
           auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
             push origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: remove modified helper scripts after application
+# trigger: final live review pass
