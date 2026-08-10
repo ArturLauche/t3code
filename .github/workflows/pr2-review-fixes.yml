@@ -32,7 +32,7 @@ jobs:
           run-install: true
 
       - name: Apply fixes
-        run: node scripts/pr2-review-fixes.mjs
+        run: node scripts/run-pr2-review-fixes.mjs
 
       - name: Format changed files
         run: vp fmt
@@ -54,7 +54,7 @@ jobs:
 
       - name: Commit validated fixes
         run: |
-          rm scripts/pr2-review-fixes.mjs .github/workflows/pr2-review-fixes.yml
+          rm scripts/pr2-review-fixes.mjs scripts/run-pr2-review-fixes.mjs scripts/.pr2-review-fixes-trigger .github/workflows/pr2-review-fixes.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
