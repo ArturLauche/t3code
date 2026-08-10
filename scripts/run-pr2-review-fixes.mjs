@@ -32,3 +32,12 @@ try {
 } finally {
   fs.rmSync(generated, { force: true });
 }
+
+for (const file of ["packages/sandbox/src/adapters/e2b.ts", "packages/sandbox/src/adapters/novita.ts"]) {
+  let text = fs.readFileSync(file, "utf8");
+  text = text.replace(
+    /  const configuredTimeoutMs = async \(sandboxId: string\): Promise<number \| undefined> => \{[\s\S]*?  \};\n  const connectInstance = async \(sandboxId: string, timeoutMs\?: number\) =>\n    Sandbox\.connect\(sandboxId, \{[\s\S]*?    \}\);/u,
+    `  const configuredTimeoutMs = async (sandboxId: string): Promise<number | undefined> => {\n    const info = await getInfo(sandboxId);\n    const metadataTimeout = Number(info.metadata["t3-timeout-ms"]);\n    return Number.isFinite(metadataTimeout) && metadataTimeout > 0 ? metadataTimeout : undefined;\n  };\n  const connectInstance = async (sandboxId: string, timeoutMs?: number) => {\n    const effectiveTimeoutMs = timeoutMs ?? (await configuredTimeoutMs(sandboxId));\n    return Sandbox.connect(sandboxId, {\n      ...options(input.credential),\n      ...(effectiveTimeoutMs === undefined ? {} : { timeoutMs: effectiveTimeoutMs }),\n    });\n  };`,
+  );
+  fs.writeFileSync(file, text);
+}
