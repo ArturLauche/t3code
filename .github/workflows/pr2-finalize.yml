@@ -7,7 +7,6 @@ on:
     paths:
       - .github/workflows/pr2-finalize.yml
 
-# This follow-up change intentionally triggers the already-registered workflow.
 permissions:
   contents: write
 
@@ -33,8 +32,10 @@ jobs:
       - name: Format changed sources
         run: vp fmt
 
-      - name: Remove temporary patch machinery
-        run: git rm .github/workflows/pr2-finalize.yml scripts/pr2-finalize.py
+      - name: Keep workflow-file changes for connector cleanup
+        run: |
+          git restore .github/workflows/build-fork.yml
+          git rm scripts/pr2-finalize.py
 
       - name: Commit review fixes
         shell: bash
