@@ -8,7 +8,7 @@ const sdk = vi.hoisted(() => {
     name: "E2B task",
     metadata: { "t3-code": "true" },
     startedAt: new Date("2026-01-01T00:00:00Z"),
-    endAt: new Date("2026-01-01T01:00:00Z"),
+    endAt: new Date("2099-01-01T01:00:00Z"),
     state: "running",
     cpuCount: 2,
     memoryMB: 1024,
@@ -97,6 +97,14 @@ describe("E2B provider API adapter", () => {
 
     await adapter.pause?.("sandbox-1");
     expect(sdk.pause).toHaveBeenCalledOnce();
+    expect(sdk.connect).toHaveBeenLastCalledWith(
+      "sandbox-1",
+      expect.objectContaining({
+        apiKey: "e2b-secret",
+        timeoutMs: expect.any(Number),
+      }),
+    );
+    expect(sdk.connect.mock.lastCall?.[1]?.timeoutMs).toBeGreaterThan(0);
     await expect(
       adapter.runCommand?.("sandbox-1", { command: "pwd", cwd: "/workspace" }),
     ).resolves.toEqual({ exitCode: 0, stdout: "ok", stderr: "" });

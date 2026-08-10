@@ -1,4 +1,7 @@
-import { createOAuthDeviceAuth, type OAuthAppAuthentication } from "@octokit/auth-oauth-device";
+import {
+  createOAuthDeviceAuth,
+  type OAuthAppAuthentication,
+} from "@octokit/auth-oauth-device";
 
 interface Verification {
   readonly user_code: string;
@@ -95,7 +98,9 @@ export class GitHubDeviceFlow {
       void authentication.then(
         () => {
           if (!verificationReceived) {
-            rejectVerification?.(new Error("GitHub device authorization completed without verification."));
+            rejectVerification?.(
+              new Error("GitHub device authorization completed without verification."),
+            );
           }
         },
         (error: unknown) => rejectVerification?.(error),

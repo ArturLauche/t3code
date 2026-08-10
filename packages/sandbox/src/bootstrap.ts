@@ -16,6 +16,18 @@ RUNNER_NEXT="$STATE_DIR/run-t3.next.$$"
 PID_FILE="$STATE_DIR/pid"
 LOG_FILE="$STATE_DIR/server.log"
 PORT="$1"
+wait_for_exit() {
+  WAIT_PID="$1"
+  WAIT_COUNT=0
+  while kill -0 "$WAIT_PID" 2>/dev/null; do
+    if [ "$WAIT_COUNT" -ge 50 ]; then
+      printf 'Timed out waiting for T3 server process %s to exit.\n' "$WAIT_PID" >&2
+      return 1
+    fi
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    sleep 0.1
+  done
+}
 mkdir -p "$STATE_DIR"
 cat >"$RUNNER_NEXT" <<'RUNNER'
 @@RUNNER@@
@@ -28,7 +40,8 @@ mv "$RUNNER_NEXT" "$RUNNER_FILE"
 chmod 700 "$RUNNER_FILE"
 PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 if [ "$CHANGED" -eq 1 ] && [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-  kill "$PID" 2>/dev/null || true
+  kill "$PID"
+  wait_for_exit "$PID"
   PID=""
 fi
 if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
@@ -67,7 +80,16 @@ STATE_DIR="$HOME/.t3/cloud-launch/t3"
 PID_FILE="$STATE_DIR/pid"
 PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-  kill "$PID" 2>/dev/null || true
+  kill "$PID"
+  COUNT=0
+  while kill -0 "$PID" 2>/dev/null; do
+    if [ "$COUNT" -ge 50 ]; then
+      printf 'Timed out waiting for T3 server process %s to exit.\n' "$PID" >&2
+      exit 1
+    fi
+    COUNT=$((COUNT + 1))
+    sleep 0.1
+  done
 fi
 rm -f "$PID_FILE"
 `;

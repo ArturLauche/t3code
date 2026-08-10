@@ -265,7 +265,13 @@ export const prepareCloudSandboxRegistration = Effect.fn(
 )(function* (input: CloudSandboxConnectionInput) {
   const gateway = yield* ClientCapabilities.CloudSandboxEnvironmentGateway;
   const provisioned = yield* gateway.provision(input.target);
-  const connectionId = `sandbox:${input.target.providerConnectionId}:${input.target.sandboxId}`;
+  const connectionId = `sandbox:${[
+    input.target.provider,
+    input.target.providerConnectionId,
+    input.target.sandboxId,
+  ]
+    .map(encodeURIComponent)
+    .join(":")}`;
   const label = input.label?.trim() || provisioned.label;
   return new CloudSandboxConnectionRegistration({
     target: new CloudSandboxConnectionTarget({

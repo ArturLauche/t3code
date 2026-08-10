@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildSandboxLaunchCommand,
   buildSandboxPairingCommand,
+  buildSandboxStopCommand,
   parseSandboxPairingCredential,
 } from "./bootstrap.ts";
 
@@ -14,14 +15,22 @@ function decodedScript(command: string): string {
 }
 
 describe("sandbox T3 bootstrap", () => {
-  it("embeds the runner safely and binds the server for provider port exposure", () => {
+  it("embeds the runner safely and waits for an old process before relaunch", () => {
     const command = buildSandboxLaunchCommand("#!/bin/sh\necho runner", 4555);
     const script = decodedScript(command);
 
     expect(script).toContain("T3CODE_NO_BROWSER=1");
     expect(script).toContain("--host 0.0.0.0");
     expect(script).toContain("#!/bin/sh\necho runner");
+    expect(script).toContain('wait_for_exit "$PID"');
+    expect(script).toContain("Timed out waiting for T3 server process");
     expect(command).toContain("4555");
+  });
+
+  it("waits for the server process before removing its pid file", () => {
+    const script = decodedScript(buildSandboxStopCommand());
+    expect(script.indexOf('while kill -0 "$PID"')).toBeLessThan(script.indexOf('rm -f "$PID_FILE"'));
+    expect(script).toContain("Timed out waiting for T3 server process");
   });
 
   it("parses the final pairing credential without leaking progress output", () => {
