@@ -168,7 +168,8 @@ export const bootstrapSshBearerSession = DesktopIpc.makeIpcMethod({
     )(httpBaseUrl);
     const descriptor = yield* withLoopbackSshApi(
       "fetch-environment-descriptor",
-      (resolvedHttpBaseUrl) => fetchRemoteEnvironmentDescriptor({ httpBaseUrl: resolvedHttpBaseUrl }),
+      (resolvedHttpBaseUrl) =>
+        fetchRemoteEnvironmentDescriptor({ httpBaseUrl: resolvedHttpBaseUrl }),
     )(httpBaseUrl);
     const resolvedHttpBaseUrl = yield* resolveLoopbackSshHttpBaseUrl(httpBaseUrl).pipe(
       Effect.mapError(

@@ -57,9 +57,7 @@ describe("GitHub device authorization state", () => {
   });
 
   it("rejects startup when OAuth fails before verification", async () => {
-    deviceAuth.create.mockReturnValue(() =>
-      Promise.reject(new Error("device flow unavailable")),
-    );
+    deviceAuth.create.mockReturnValue(() => Promise.reject(new Error("device flow unavailable")));
     const flow = new GitHubDeviceFlow({ clientId: "client-id" });
 
     await expect(flow.start()).rejects.toThrow("device flow unavailable");

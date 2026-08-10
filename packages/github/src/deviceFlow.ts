@@ -1,7 +1,4 @@
-import {
-  createOAuthDeviceAuth,
-  type OAuthAppAuthentication,
-} from "@octokit/auth-oauth-device";
+import { createOAuthDeviceAuth, type OAuthAppAuthentication } from "@octokit/auth-oauth-device";
 
 interface Verification {
   readonly user_code: string;

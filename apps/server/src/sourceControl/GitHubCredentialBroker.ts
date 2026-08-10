@@ -191,9 +191,7 @@ export const make = Effect.gen(function* () {
         next.delete(sessionId);
         return next;
       }).pipe(
-        Effect.andThen(
-          fileSystem.remove(tokenFileFor(Option.some(sessionId))).pipe(Effect.ignore),
-        ),
+        Effect.andThen(fileSystem.remove(tokenFileFor(Option.some(sessionId))).pipe(Effect.ignore)),
       ),
     getToken,
     setPersistentToken: (token) =>

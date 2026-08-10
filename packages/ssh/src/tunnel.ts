@@ -34,6 +34,7 @@ import {
   collectProcessOutput,
   getLastNonEmptyOutputLine,
   remoteStateKey,
+  redactSshCommandForLogs,
   resolveSshCommand,
   resolveSshTarget,
   runSshCommand,
@@ -114,16 +115,6 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
     hasUsername: target.username !== null,
     port: target.port,
   };
-}
-
-function redactSshCommandForLogs(
-  target: DesktopSshEnvironmentTarget,
-  command: readonly string[],
-): string[] {
-  if (!usesEphemeralUsernameCredential(target) || target.username === null) {
-    return [...command];
-  }
-  return command.map((part) => part.replaceAll(target.username!, "[redacted-ssh-credential]"));
 }
 
 function sshRunnerLogFields(runner: RemoteT3RunnerOptions | undefined) {

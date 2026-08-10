@@ -13,7 +13,9 @@ describe("GitHub secret redaction", () => {
 
   it("preserves useful Error messages while redacting secrets", () => {
     expect(
-      redactGitHubSecrets(new Error("request failed for github_pat_abcdefghijklmnopqrstuvwxyz012345")),
+      redactGitHubSecrets(
+        new Error("request failed for github_pat_abcdefghijklmnopqrstuvwxyz012345"),
+      ),
     ).toBe("request failed for [REDACTED]");
   });
 });

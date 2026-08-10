@@ -405,8 +405,7 @@ export const DesktopSshPasswordPromptResolutionInputSchema = Schema.Struct({
 });
 
 export const DesktopGitHubCredentialSyncInputSchema = Schema.Struct({
-  httpBaseUrl: Schema.String,
-  environmentAccessToken: Schema.String,
+  environmentId: EnvironmentId,
 });
 export type DesktopGitHubCredentialSyncInput = typeof DesktopGitHubCredentialSyncInputSchema.Type;
 

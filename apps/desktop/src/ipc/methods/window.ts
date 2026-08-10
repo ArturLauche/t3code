@@ -9,6 +9,7 @@ import {
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
 } from "@t3tools/contracts";
+import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
 import * as NodeOS from "node:os";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -19,6 +20,7 @@ import * as Schema from "effect/Schema";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as DesktopGitHubIntegration from "../../github/DesktopGitHubIntegration.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
@@ -149,7 +151,26 @@ export const getLocalEnvironmentBearerToken = DesktopIpc.makeIpcMethod({
   result: Schema.String,
   handler: Effect.fn("desktop.ipc.window.getLocalEnvironmentBearerToken")(function* () {
     const localAuth = yield* DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth;
-    return yield* localAuth.getBearerToken;
+    const token = yield* localAuth.getBearerToken;
+    const pool = yield* DesktopBackendPool.DesktopBackendPool;
+    const github = yield* Effect.serviceOption(DesktopGitHubIntegration.DesktopGitHubIntegration);
+    if (Option.isSome(github)) {
+      const primary = yield* pool.primary;
+      const config = Option.getOrNull(yield* primary.currentConfig);
+      if (config !== null) {
+        const descriptor = yield* fetchRemoteEnvironmentDescriptor({
+          httpBaseUrl: config.httpBaseUrl.href,
+        }).pipe(Effect.option);
+        if (Option.isSome(descriptor)) {
+          yield* github.value.registerTrustedEnvironment({
+            environmentId: descriptor.value.environmentId,
+            httpBaseUrl: config.httpBaseUrl.href,
+            accessToken: token,
+          });
+        }
+      }
+    }
+    return token;
   }),
 });
 

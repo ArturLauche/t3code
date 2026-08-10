@@ -95,9 +95,10 @@ export const make = Effect.gen(function* () {
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
     const githubEnvironment =
       Option.isSome(githubBroker) && (input.command === "git" || input.command === "gh")
-        ? yield* (input.command === "gh"
-            ? githubBroker.value.cliEnvironment
-            : githubBroker.value.processEnvironment
+        ? yield* (
+            input.command === "gh"
+              ? githubBroker.value.cliEnvironment
+              : githubBroker.value.processEnvironment
           ).pipe(
             Effect.catch((error) =>
               Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {

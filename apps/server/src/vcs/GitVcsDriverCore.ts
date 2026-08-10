@@ -745,8 +745,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               cwd: commandInput.cwd,
               env: {
                 ...process.env,
-                ...input.env,
                 ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
+                ...input.env,
                 ...trace2Monitor.env,
               },
             }),

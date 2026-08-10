@@ -170,7 +170,7 @@ export function usesEphemeralUsernameCredential(target: DesktopSshEnvironmentTar
   return target.hostname === "ssh.app.daytona.io" && target.username !== null;
 }
 
-function redactSshCommandForLogs(
+export function redactSshCommandForLogs(
   target: DesktopSshEnvironmentTarget,
   command: readonly string[],
 ): string[] {
@@ -220,6 +220,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const sshCommand = yield* resolveSshCommand;
   const logCommand = redactSshCommandForLogs(target, [sshCommand, ...args]);
+  const logHostSpec = redactSshCommandForLogs(target, [hostSpec])[0] ?? "[ssh-target]";
   yield* Effect.logDebug("ssh.command.start", {
     ...sshTargetLogFields(target),
     command: logCommand,
@@ -248,7 +249,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
             message:
               cause instanceof Error
                 ? cause.message
-                : `Failed to spawn SSH command for ${hostSpec}.`,
+                : `Failed to spawn SSH command for ${logHostSpec}.`,
             cause,
           }),
       ),
@@ -265,11 +266,13 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     Effect.mapError(
       (cause) =>
         new SshCommandError({
-          command: ["ssh", ...args],
+          command: logCommand,
           exitCode: null,
           stderr: "",
           message:
-            cause instanceof Error ? cause.message : `Failed to run SSH command for ${hostSpec}.`,
+            cause instanceof Error
+              ? cause.message
+              : `Failed to run SSH command for ${logHostSpec}.`,
           cause,
         }),
     ),
@@ -277,29 +280,30 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
 
   if (exitCode !== 0) {
     const diagnosticStdout = redactSshErrorOutput(stdout);
+    const diagnosticStderr = redactSshErrorOutput(stderr);
     yield* Effect.logWarning("ssh.command.failed", {
       ...sshTargetLogFields(target),
-      command: ["ssh", ...args],
+      command: logCommand,
       exitCode,
       stdout: diagnosticStdout,
-      stderr,
+      stderr: diagnosticStderr,
     });
     return yield* new SshCommandError({
-      command: ["ssh", ...args],
+      command: logCommand,
       exitCode,
       stdout: diagnosticStdout,
-      stderr,
+      stderr: diagnosticStderr,
       message: normalizeSshErrorMessage({
         stdout: diagnosticStdout,
-        stderr,
-        fallbackMessage: `SSH command failed for ${hostSpec} (exit ${exitCode}).`,
+        stderr: diagnosticStderr,
+        fallbackMessage: `SSH command failed for ${logHostSpec} (exit ${exitCode}).`,
       }),
     });
   }
 
   yield* Effect.logDebug("ssh.command.succeeded", {
     ...sshTargetLogFields(target),
-    command: ["ssh", ...args],
+    command: logCommand,
   });
   return { stdout, stderr };
 });

@@ -29,7 +29,9 @@ describe("sandbox T3 bootstrap", () => {
 
   it("waits for the server process before removing its pid file", () => {
     const script = decodedScript(buildSandboxStopCommand());
-    expect(script.indexOf('while kill -0 "$PID"')).toBeLessThan(script.indexOf('rm -f "$PID_FILE"'));
+    expect(script.indexOf('while kill -0 "$PID"')).toBeLessThan(
+      script.indexOf('rm -f "$PID_FILE"'),
+    );
     expect(script).toContain("Timed out waiting for T3 server process");
   });
 

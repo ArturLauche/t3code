@@ -325,7 +325,14 @@ export const make = Effect.gen(function* () {
       }
     })();
     if (Option.isSome(sourceControlCredentials)) {
-      yield* sourceControlCredentials.value.sync(prepared);
+      yield* sourceControlCredentials.value.sync(prepared).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not synchronize optional source-control credentials.", {
+            cause,
+            environmentId: prepared.target.environmentId,
+          }),
+        ),
+      );
     }
     return prepared;
   });

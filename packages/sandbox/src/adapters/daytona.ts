@@ -56,9 +56,7 @@ export function toRecord(connectionId: string, sandbox: Sandbox): CloudSandboxRe
     sandbox.autoDeleteInterval !== undefined && sandbox.autoDeleteInterval >= 0
       ? {
           action: "delete" as const,
-          ...(sandbox.autoDeleteInterval > 0
-            ? { timeoutMinutes: sandbox.autoDeleteInterval }
-            : {}),
+          ...(sandbox.autoDeleteInterval > 0 ? { timeoutMinutes: sandbox.autoDeleteInterval } : {}),
         }
       : sandbox.autoPauseInterval !== undefined && sandbox.autoPauseInterval > 0
         ? { action: "pause" as const, timeoutMinutes: sandbox.autoPauseInterval }

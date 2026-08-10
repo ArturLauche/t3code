@@ -350,21 +350,26 @@ const capabilitiesLayer = Layer.effectContext(
         function* (connection) {
           const bridge = window.desktopBridge;
           if (bridge === undefined) return;
-          const environmentAccessToken =
-            connection.httpAuthorization?._tag === "Bearer"
-              ? connection.httpAuthorization.token
-              : connection.target._tag === "PrimaryConnectionTarget"
-                ? yield* Effect.tryPromise({
-                    try: () => bridge.getLocalEnvironmentBearerToken(),
-                    catch: cloudSandboxPreparationError,
-                  })
-                : null;
-          if (environmentAccessToken === null) return;
+          if (
+            connection.target._tag === "RelayConnectionTarget" ||
+            connection.target._tag === "BearerConnectionTarget"
+          ) {
+            return;
+          }
+          if (connection.target._tag === "PrimaryConnectionTarget") {
+            yield* Effect.tryPromise({
+              try: () => bridge.getLocalEnvironmentBearerToken(),
+              catch: (cause) =>
+                new ConnectionTransientError({
+                  reason: "remote-unavailable",
+                  detail: `Could not register the local environment for GitHub credential sync: ${cause instanceof Error ? cause.message : String(cause)}`,
+                }),
+            });
+          }
           yield* Effect.tryPromise({
             try: () =>
               bridge.syncGitHubCredential({
-                httpBaseUrl: connection.httpBaseUrl,
-                environmentAccessToken,
+                environmentId: connection.target.environmentId,
               }),
             catch: (cause) =>
               new ConnectionTransientError({
