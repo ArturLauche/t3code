@@ -23,6 +23,7 @@ jobs:
         with:
           ref: agent/execution-environments-github-sandboxes
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Apply remaining source review fixes
         run: |
@@ -36,6 +37,8 @@ jobs:
 
       - name: Commit source fixes
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "Artur Lauche"
@@ -43,6 +46,8 @@ jobs:
           git add -u
           git diff --cached --check
           git commit -m "fix: close remaining PR review findings"
-          git push origin HEAD:agent/execution-environments-github-sandboxes
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
+            push origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: apply source without dependency installation
+# trigger: securely apply accumulated source fixes
