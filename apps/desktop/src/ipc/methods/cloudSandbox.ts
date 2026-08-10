@@ -13,6 +13,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import * as DesktopGitHubIntegration from "../../github/DesktopGitHubIntegration.ts";
 import * as DesktopCloudSandboxEnvironment from "../../sandbox/DesktopCloudSandboxEnvironment.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -83,7 +84,16 @@ export const ensureCloudSandbox = DesktopIpc.makeIpcMethod({
   result: DesktopCloudSandboxBootstrapSchema,
   handler: Effect.fn("desktop.ipc.cloudSandbox.ensure")(function* (input) {
     const cloud = yield* DesktopCloudSandboxEnvironment.DesktopCloudSandboxEnvironment;
-    return yield* cloud.ensureSandbox(input);
+    const github = yield* DesktopGitHubIntegration.DesktopGitHubIntegration;
+    const bootstrap = yield* cloud.ensureSandbox(input);
+    if (bootstrap.bearerToken !== null) {
+      yield* github.registerTrustedEnvironment({
+        environmentId: bootstrap.environmentId,
+        httpBaseUrl: bootstrap.httpBaseUrl,
+        accessToken: bootstrap.bearerToken,
+      });
+    }
+    return bootstrap;
   }),
 });
 
