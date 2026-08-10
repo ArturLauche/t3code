@@ -47,16 +47,11 @@ export class GitHubDeviceFlow {
       return this.starting;
     }
 
-    let resolveVerification: ((verification: Verification) => void) | null = null;
-    let rejectVerification: ((error: unknown) => void) | null = null;
     let verificationReceived = false;
-    const verification = new Promise<Verification>((resolve, reject) => {
-      resolveVerification = resolve;
-      rejectVerification = reject;
-    });
+    const verification = Promise.withResolvers<Verification>();
 
     let authentication: Promise<OAuthAppAuthentication>;
-    const starting = verification.then((value) => {
+    const starting = verification.promise.then((value) => {
       const authorization = {
         userCode: value.user_code,
         verificationUri: value.verification_uri,
@@ -88,24 +83,24 @@ export class GitHubDeviceFlow {
         scopes: [...(this.options.scopes ?? ["repo", "read:org", "workflow"])],
         onVerification: (value) => {
           verificationReceived = true;
-          resolveVerification?.(value);
+          verification.resolve(value);
         },
       });
       authentication = auth({ type: "oauth" });
       void authentication.then(
         () => {
           if (!verificationReceived) {
-            rejectVerification?.(
+            verification.reject(
               new Error("GitHub device authorization completed without verification."),
             );
           }
         },
-        (error: unknown) => rejectVerification?.(error),
+        (error: unknown) => verification.reject(error),
       );
     } catch (error) {
       authentication = Promise.reject(error);
       void authentication.catch(() => undefined);
-      rejectVerification?.(error);
+      verification.reject(error);
     }
 
     void starting.then(

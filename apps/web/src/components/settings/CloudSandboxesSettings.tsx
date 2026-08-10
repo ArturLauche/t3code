@@ -14,6 +14,7 @@ import * as Option from "effect/Option";
 import { CloudIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { environmentCatalog } from "../../connection/catalog";
 import { connectCloudSandbox } from "../../connection/onboarding";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useEnvironments } from "../../state/environments";
@@ -91,6 +92,7 @@ function ProviderDialog({ onSaved }: { readonly onSaved: () => Promise<void> }) 
         await bridge
           .removeCloudSandboxProviderConnection({ id: savedConnection.id })
           .catch(() => undefined);
+        await onSaved().catch(() => undefined);
       }
       setError(errorMessage(cause));
     } finally {
@@ -155,7 +157,7 @@ function ProviderDialog({ onSaved }: { readonly onSaved: () => Promise<void> }) 
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </DialogPanel>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" disabled={pending} />}>Cancel</DialogClose>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
           <Button disabled={pending || !apiKey.trim() || !label.trim()} onClick={() => void save()}>
             {pending ? (
               <>
@@ -205,6 +207,10 @@ function CreateSandboxDialog({
   const create = async () => {
     if (!bridge || !selected) return;
     const timeout = Number.parseInt(timeoutMinutes, 10);
+    if (!Number.isInteger(timeout) || timeout <= 0) {
+      setError("Automatic timeout must be a positive whole number of minutes.");
+      return;
+    }
     const parsedCpu = Number.parseFloat(cpu);
     const parsedMemoryGiB = Number.parseFloat(memoryGiB);
     const parsedDiskGiB = Number.parseFloat(diskGiB);
@@ -421,7 +427,7 @@ function CreateSandboxDialog({
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </DialogPanel>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" disabled={pending} />}>Cancel</DialogClose>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
           <Button disabled={pending || !selected} onClick={() => void create()}>
             {pending ? (
               <>
@@ -440,6 +446,7 @@ function CreateSandboxDialog({
 export function CloudSandboxesSettingsSection() {
   const bridge = window.desktopBridge;
   const connect = useAtomCommand(connectCloudSandbox, { reportFailure: false });
+  const removeEnvironment = useAtomCommand(environmentCatalog.remove, { reportFailure: false });
   const { environments } = useEnvironments();
   const projects = useProjects();
   const { handleNewThread } = useHandleNewThread();
@@ -479,11 +486,31 @@ export function CloudSandboxesSettingsSection() {
     void refresh();
   }, [refresh]);
 
+  const removeRegisteredSandboxEnvironments = async (
+    predicate: (sandbox: { providerConnectionId: string; sandboxId: string }) => boolean,
+  ) => {
+    for (const environment of environments) {
+      const profile = Option.getOrNull(environment.entry.profile);
+      if (profile?._tag !== "CloudSandboxConnectionProfile" || !predicate(profile.target)) continue;
+      const result = await removeEnvironment(environment.environmentId);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        throw squashAtomCommandFailure(result);
+      }
+    }
+  };
+
   const runLifecycle = async (sandbox: CloudSandboxRecord, action: CloudSandboxLifecycleAction) => {
     if (!bridge) return;
     const key = `${sandbox.providerConnectionId}:${sandbox.sandboxId}:${action}`;
     setPendingKey(key);
     try {
+      if (action === "pause" || action === "stop" || action === "delete") {
+        await removeRegisteredSandboxEnvironments(
+          (target) =>
+            target.providerConnectionId === sandbox.providerConnectionId &&
+            target.sandboxId === sandbox.sandboxId,
+        );
+      }
       await bridge.runCloudSandboxLifecycleAction({
         providerConnectionId: sandbox.providerConnectionId,
         sandboxId: sandbox.sandboxId,
@@ -563,6 +590,9 @@ export function CloudSandboxesSettingsSection() {
     );
     if (!bridge || !confirmed) return;
     try {
+      await removeRegisteredSandboxEnvironments(
+        (target) => target.providerConnectionId === connection.id,
+      );
       await bridge.removeCloudSandboxProviderConnection({ id: connection.id });
       await refresh();
     } catch (cause) {

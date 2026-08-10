@@ -52,7 +52,15 @@ fi
 READY=0
 COUNT=0
 while [ "$COUNT" -lt 120 ]; do
-  if node -e 'const http=require("node:http");const p=Number(process.argv[1]);const r=http.get({host:"127.0.0.1",port:p,path:"/",timeout:1000},x=>{x.resume();process.exit(x.statusCode>=200&&x.statusCode<500?0:1)});r.on("timeout",()=>{r.destroy();process.exit(1)});r.on("error",()=>process.exit(1))' "$PORT" >/dev/null 2>&1; then
+  if command -v curl >/dev/null 2>&1 && curl --silent --max-time 1 -o /dev/null "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  if command -v wget >/dev/null 2>&1 && wget --quiet --timeout=1 --tries=1 -O /dev/null "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  if command -v node >/dev/null 2>&1 && node -e 'const http=require("node:http");const p=Number(process.argv[1]);const r=http.get({host:"127.0.0.1",port:p,path:"/",timeout:1000},x=>{x.resume();process.exit(x.statusCode>=200&&x.statusCode<500?0:1)});r.on("timeout",()=>{r.destroy();process.exit(1)});r.on("error",()=>process.exit(1))' "$PORT" >/dev/null 2>&1; then
     READY=1
     break
   fi

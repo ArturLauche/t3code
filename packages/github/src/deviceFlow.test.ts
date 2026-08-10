@@ -65,10 +65,10 @@ describe("GitHub device authorization state", () => {
   });
 
   it("shares one startup between concurrent callers", async () => {
-    let verify: ((value: unknown) => void) | null = null;
+    const verification = { current: null as ((value: unknown) => void) | null };
     deviceAuth.create.mockImplementation(
       (options: { onVerification: (value: unknown) => void }) => {
-        verify = options.onVerification;
+        verification.current = options.onVerification;
         return () => new Promise<OAuthAppAuthentication>(() => undefined);
       },
     );
@@ -79,7 +79,7 @@ describe("GitHub device authorization state", () => {
     expect(deviceAuth.create).toHaveBeenCalledTimes(1);
     expect(second).toBe(first);
 
-    verify?.({
+    verification.current?.({
       user_code: "ABCD-1234",
       verification_uri: "https://github.com/login/device",
       expires_in: 900,

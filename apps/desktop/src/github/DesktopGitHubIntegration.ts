@@ -150,14 +150,12 @@ export const make = Effect.gen(function* () {
       readonly environmentId: EnvironmentId;
       readonly target: TrustedEnvironmentCredentialTarget;
       readonly token: string;
-      readonly expiresAt: string | null;
     }) {
       const endpoint = new URL("/api/source-control/github/credential", input.target.httpBaseUrl);
       yield* HttpClientRequest.put(endpoint).pipe(
         HttpClientRequest.bearerToken(input.target.accessToken),
         HttpClientRequest.bodyJsonUnsafe({
           token: input.token,
-          ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
           ttlSeconds: REMOTE_CREDENTIAL_TTL_SECONDS,
         }),
         httpClient.execute,
@@ -185,7 +183,6 @@ export const make = Effect.gen(function* () {
           environmentId,
           target,
           token: credential.value.token,
-          expiresAt: credential.value.expiresAt,
         }).pipe(
           Effect.catch((error) =>
             Effect.logWarning("Could not refresh a synchronized GitHub credential.", {
@@ -390,7 +387,6 @@ export const make = Effect.gen(function* () {
           environmentId: input.environmentId,
           target,
           token: credential.value.token,
-          expiresAt: credential.value.expiresAt,
         });
         return true;
       }),

@@ -24,6 +24,7 @@ import {
   type SandboxSshAccess,
 } from "@t3tools/sandbox";
 import { buildRemoteT3RunnerScript, type RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -46,7 +47,10 @@ export interface DesktopCloudSandboxEnvironmentLayerOptions {
 export class DesktopCloudSandboxEnvironment extends Context.Service<
   DesktopCloudSandboxEnvironment,
   {
-    readonly listProviderConnections: Effect.Effect<readonly CloudSandboxProviderConnection[]>;
+    readonly listProviderConnections: Effect.Effect<
+      readonly CloudSandboxProviderConnection[],
+      ExecutionEnvironmentOperationError
+    >;
     readonly saveProviderConnection: (
       input: CloudSandboxProviderConnectionInput,
     ) => Effect.Effect<CloudSandboxProviderConnection, ExecutionEnvironmentOperationError>;
@@ -167,8 +171,18 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
       );
     }
     const key = `${input.sandbox.providerConnectionId}:${input.sandbox.sandboxId}`;
+    const isUsable = (transport: DaytonaTransport, now: number) => {
+      const expiresAt = Date.parse(transport.access.expiresAt);
+      return Number.isFinite(expiresAt) && expiresAt > now + 30_000;
+    };
+    const cleanupTransport = (transport: DaytonaTransport) =>
+      ssh.disconnectEnvironment(transport.target).pipe(
+        Effect.ignore,
+        Effect.andThen(Effect.tryPromise(() => transport.access.revoke()).pipe(Effect.ignore)),
+      );
+    const now = yield* Clock.currentTimeMillis;
     const active = (yield* Ref.get(daytonaTransports)).get(key);
-    let transport = active;
+    let transport = active && isUsable(active, now) ? active : undefined;
     if (!transport) {
       const access = yield* callProvider({
         provider: "daytona",
@@ -176,7 +190,7 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
         secret: input.secret,
         action: () => input.adapter.createSshAccess!(input.sandbox.sandboxId, 60),
       });
-      transport = {
+      const candidate: DaytonaTransport = {
         access,
         target: {
           alias: access.hostname,
@@ -185,7 +199,19 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
           port: access.port,
         },
       };
-      yield* Ref.update(daytonaTransports, (current) => new Map(current).set(key, transport!));
+      const compareAt = yield* Clock.currentTimeMillis;
+      const decision = yield* Ref.modify(daytonaTransports, (current) => {
+        const existing = current.get(key);
+        if (existing && isUsable(existing, compareAt)) {
+          return [{ winner: existing, loser: candidate, stale: null }, current] as const;
+        }
+        const next = new Map(current);
+        next.set(key, candidate);
+        return [{ winner: candidate, loser: null, stale: existing ?? null }, next] as const;
+      });
+      if (decision.loser) yield* cleanupTransport(decision.loser);
+      if (decision.stale) yield* cleanupTransport(decision.stale);
+      transport = decision.winner;
     }
     const bootstrap = yield* ssh
       .ensureEnvironment(transport.target, { issuePairingToken: input.issuePairingToken })
@@ -275,20 +301,19 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
     sandboxId: string,
   ) {
     const key = `${providerConnectionId}:${sandboxId}`;
-    const current = yield* Ref.get(daytonaTransports);
-    const transport = current.get(key);
+    const transport = yield* Ref.modify(daytonaTransports, (entries) => {
+      const selected = entries.get(key);
+      const next = new Map(entries);
+      next.delete(key);
+      return [selected, next] as const;
+    });
     if (!transport) return;
     yield* ssh.disconnectEnvironment(transport.target).pipe(Effect.ignore);
     yield* Effect.tryPromise(() => transport.access.revoke()).pipe(Effect.ignore);
-    yield* Ref.update(daytonaTransports, (entries) => {
-      const next = new Map(entries);
-      next.delete(key);
-      return next;
-    });
   });
 
   const closeAllDaytonaTransports = Effect.gen(function* () {
-    const current = yield* Ref.get(daytonaTransports);
+    const current = yield* Ref.getAndSet(daytonaTransports, new Map());
     yield* Effect.forEach(
       current,
       ([, transport]) =>
@@ -300,13 +325,14 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
           ),
       { concurrency: "unbounded", discard: true },
     );
-    yield* Ref.set(daytonaTransports, new Map());
   });
 
   yield* Effect.addFinalizer(() => closeAllDaytonaTransports);
 
   return DesktopCloudSandboxEnvironment.of({
-    listProviderConnections: store.listProviderConnections.pipe(Effect.orDie),
+    listProviderConnections: store.listProviderConnections.pipe(
+      Effect.mapError((cause) => operationError("list-providers", cause)),
+    ),
     saveProviderConnection: (input) =>
       store
         .saveProviderConnection(input)
@@ -360,7 +386,15 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
               action: adapter.list,
             });
             return yield* Effect.forEach(records, withAssociation);
-          }),
+          }).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not list sandboxes for provider connection.", {
+                providerConnectionId: connection.id,
+                provider: connection.provider,
+                detail: cause.detail,
+              }).pipe(Effect.as<readonly CloudSandboxRecord[]>([])),
+            ),
+          ),
         { concurrency: "unbounded" },
       ).pipe(Effect.map((groups) => groups.flat()));
     }),
@@ -485,7 +519,13 @@ export const make = Effect.fn("desktop.cloudSandbox.make")(function* (
             secret: stored.apiKey,
             action: () => adapter.delete(input.sandboxId),
           });
-          yield* store.setAssociation({ ...input, project: null }).pipe(Effect.ignore);
+          yield* store
+            .setAssociation({
+              providerConnectionId: input.providerConnectionId,
+              sandboxId: input.sandboxId,
+              project: null,
+            })
+            .pipe(Effect.ignore);
           return null;
         }
         const action = adapter[input.action];

@@ -93,20 +93,37 @@ export const make = Effect.gen(function* () {
   const githubBroker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
 
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
-    const githubEnvironment =
-      Option.isSome(githubBroker) && (input.command === "git" || input.command === "gh")
-        ? yield* (
-            input.command === "gh"
-              ? githubBroker.value.cliEnvironment
-              : githubBroker.value.processEnvironment
-          ).pipe(
+    const githubLease =
+      Option.isSome(githubBroker) && input.command === "git"
+        ? yield* githubBroker.value.gitProcessEnvironment.pipe(
             Effect.catch((error) =>
               Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                operation: error.operation,
+              }).pipe(Effect.as(Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>())),
+            ),
+          )
+        : Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>();
+    const githubCliEnvironment =
+      Option.isSome(githubBroker) && input.command === "gh"
+        ? yield* githubBroker.value.cliEnvironment.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not prepare GitHub CLI credentials.", {
                 operation: error.operation,
               }).pipe(Effect.as(Option.none<NodeJS.ProcessEnv>())),
             ),
           )
         : Option.none<NodeJS.ProcessEnv>();
+    const baseEnvironment = { ...process.env, ...input.env };
+    const processEnvironment = Option.isSome(githubLease)
+      ? GitHubCredentialBroker.mergeGitHubGitEnvironment(
+          baseEnvironment,
+          githubLease.value.environment,
+        )
+      : {
+          ...process.env,
+          ...(Option.isSome(githubCliEnvironment) ? githubCliEnvironment.value : {}),
+          ...input.env,
+        };
     const baseError = {
       operation: input.operation,
       command: input.command,
@@ -121,11 +138,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        env: {
-          ...process.env,
-          ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
-          ...input.env,
-        },
+        env: processEnvironment,
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: "truncate",
@@ -133,6 +146,7 @@ export const make = Effect.gen(function* () {
         timeoutBehavior: "error",
       })
       .pipe(
+        Option.isSome(githubLease) ? Effect.ensuring(githubLease.value.release) : (effect) => effect,
         Effect.mapError(
           Match.valueTags({
             ProcessSpawnError: (error) =>

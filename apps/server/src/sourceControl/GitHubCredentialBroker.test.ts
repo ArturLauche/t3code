@@ -56,17 +56,28 @@ it.effect("uses a host-restricted askpass helper without exposing the token in g
     const token = "github_pat_test_super_secret";
 
     yield* broker.injectEphemeral({ sessionId: "session-a", token, ttlSeconds: 60 });
-    const environment = Option.getOrThrow(
-      yield* broker.processEnvironment.pipe(
+    const lease = Option.getOrThrow(
+      yield* broker.gitProcessEnvironment.pipe(
         Effect.provideService(EnvironmentAuthenticatedPrincipal, principal("session-a")),
       ),
+    );
+    const environment = GitHubCredentialBroker.mergeGitHubGitEnvironment(
+      {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "credential.helper",
+        GIT_CONFIG_VALUE_0: "store",
+      },
+      lease.environment,
     );
 
     assert.isUndefined(environment.GH_TOKEN);
     assert.isUndefined(environment.GITHUB_TOKEN);
     assert.isUndefined(environment.T3_GITHUB_TOKEN);
     assert.strictEqual(environment.GIT_TERMINAL_PROMPT, "0");
-    assert.strictEqual(environment.GIT_CONFIG_KEY_0, "core.hooksPath");
+    assert.strictEqual(environment.GIT_CONFIG_COUNT, "2");
+    assert.strictEqual(environment.GIT_CONFIG_KEY_0, "credential.helper");
+    assert.strictEqual(environment.GIT_CONFIG_KEY_1, "core.hooksPath");
+    const tokenFile = environment.T3_GITHUB_TOKEN_FILE!;
     const wrapper = yield* fileSystem.readFileString(environment.GIT_ASKPASS!);
     const helper = yield* fileSystem.readFileString(environment.T3_GITHUB_ASKPASS_SCRIPT!);
     assert.notInclude(wrapper, "node ");
@@ -74,6 +85,8 @@ it.effect("uses a host-restricted askpass helper without exposing the token in g
     assert.notInclude(helper, token);
     assert.include(helper, 'remote.hostname.toLowerCase() !== "github.com"');
     assert.include(helper, 'remote.protocol !== "https:"');
+    yield* lease.release;
+    assert.isFalse(yield* fileSystem.exists(tokenFile));
   }).pipe(Effect.provide(brokerLayer)),
 );
 

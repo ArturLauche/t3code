@@ -718,15 +718,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const appendTruncationMarker = input.appendTruncationMarker ?? false;
 
       const runGitCommand = Effect.fn("runGitCommand")(function* () {
-        const githubEnvironment = Option.isSome(githubBroker)
-          ? yield* githubBroker.value.processEnvironment.pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
-                  operation: error.operation,
-                }).pipe(Effect.as(Option.none<NodeJS.ProcessEnv>())),
+        const githubLease = Option.isSome(githubBroker)
+          ? yield* Effect.acquireRelease(
+              githubBroker.value.gitProcessEnvironment.pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                    operation: error.operation,
+                  }).pipe(
+                    Effect.as(Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>()),
+                  ),
+                ),
               ),
+              (lease) => (Option.isSome(lease) ? lease.value.release : Effect.void),
             )
-          : Option.none<NodeJS.ProcessEnv>();
+          : Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>();
         const trace2Monitor = yield* createTrace2Monitor(commandInput, input.progress).pipe(
           Effect.provideService(Path.Path, path),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -743,12 +748,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           .spawn(
             ChildProcess.make("git", commandInput.args, {
               cwd: commandInput.cwd,
-              env: {
-                ...process.env,
-                ...(Option.isSome(githubEnvironment) ? githubEnvironment.value : {}),
-                ...input.env,
-                ...trace2Monitor.env,
-              },
+              env: Option.isSome(githubLease)
+                ? GitHubCredentialBroker.mergeGitHubGitEnvironment(
+                    { ...process.env, ...input.env, ...trace2Monitor.env },
+                    githubLease.value.environment,
+                  )
+                : { ...process.env, ...input.env, ...trace2Monitor.env },
             }),
           )
           .pipe(

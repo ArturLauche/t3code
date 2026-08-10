@@ -23,6 +23,30 @@ interface EphemeralCredential {
   readonly expiresAtEpochMs: number;
 }
 
+export interface GitHubGitEnvironmentLease {
+  readonly environment: NodeJS.ProcessEnv;
+  readonly release: Effect.Effect<void>;
+}
+
+const BROKER_HOOKS_PATH_KEY = "T3_GITHUB_HOOKS_PATH";
+
+export function mergeGitHubGitEnvironment(
+  baseEnvironment: NodeJS.ProcessEnv,
+  brokerEnvironment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const hooksPath = brokerEnvironment[BROKER_HOOKS_PATH_KEY];
+  const merged = { ...brokerEnvironment, ...baseEnvironment };
+  delete merged[BROKER_HOOKS_PATH_KEY];
+  if (!hooksPath) return merged;
+
+  const parsedCount = Number.parseInt(merged.GIT_CONFIG_COUNT ?? "0", 10);
+  const count = Number.isSafeInteger(parsedCount) && parsedCount >= 0 ? parsedCount : 0;
+  merged.GIT_CONFIG_COUNT = String(count + 1);
+  merged[`GIT_CONFIG_KEY_${count}`] = "core.hooksPath";
+  merged[`GIT_CONFIG_VALUE_${count}`] = hooksPath;
+  return merged;
+}
+
 export class GitHubCredentialBrokerError extends Schema.TaggedErrorClass<GitHubCredentialBrokerError>()(
   "GitHubCredentialBrokerError",
   { operation: Schema.String, detail: Schema.String },
@@ -46,8 +70,8 @@ export class GitHubCredentialBroker extends Context.Service<
       token: string,
     ) => Effect.Effect<void, GitHubCredentialBrokerError>;
     readonly clearPersistentToken: Effect.Effect<void, GitHubCredentialBrokerError>;
-    readonly processEnvironment: Effect.Effect<
-      Option.Option<NodeJS.ProcessEnv>,
+    readonly gitProcessEnvironment: Effect.Effect<
+      Option.Option<GitHubGitEnvironmentLease>,
       GitHubCredentialBrokerError
     >;
     readonly cliEnvironment: Effect.Effect<
@@ -84,6 +108,7 @@ export const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const platform = yield* HostProcessPlatform;
   const ephemeral = yield* Ref.make(new Map<string, EphemeralCredential>());
+  const tokenFiles = yield* Ref.make(new Map<string, ReadonlySet<string>>());
   const helperDir = path.join(config.stateDir, "credential-helpers");
   const tokenDir = path.join(helperDir, "tokens");
   const emptyHooksDir = path.join(helperDir, "empty-hooks");
@@ -111,6 +136,24 @@ export const make = Effect.gen(function* () {
   const currentSessionId = Effect.serviceOption(EnvironmentAuthenticatedPrincipal).pipe(
     Effect.map(Option.map((principal) => String(principal.sessionId))),
   );
+  const credentialKey = (sessionId: Option.Option<string>) =>
+    Option.match(sessionId, {
+      onNone: () => "persistent",
+      onSome: (value) => `session:${value}`,
+    });
+  const cleanupTokenFiles = (key: string) =>
+    Ref.modify(tokenFiles, (current) => {
+      const files = [...(current.get(key) ?? [])];
+      const next = new Map(current);
+      next.delete(key);
+      return [files, next] as const;
+    }).pipe(
+      Effect.flatMap((files) =>
+        Effect.forEach(files, (file) => fileSystem.remove(file, { force: true }).pipe(Effect.ignore), {
+          discard: true,
+        }),
+      ),
+    );
 
   const getTokenForSession = (sessionId: Option.Option<string>) =>
     Effect.gen(function* () {
@@ -125,6 +168,7 @@ export const make = Effect.gen(function* () {
             next.delete(sessionId.value);
             return next;
           });
+          yield* cleanupTokenFiles(credentialKey(sessionId));
         }
       }
       return yield* secrets.get(PERSISTED_GITHUB_TOKEN).pipe(
@@ -135,38 +179,53 @@ export const make = Effect.gen(function* () {
 
   const getToken = currentSessionId.pipe(Effect.flatMap(getTokenForSession));
 
-  const tokenFileFor = (sessionId: Option.Option<string>) => {
-    const key = Option.getOrElse(sessionId, () => "persistent");
+  const tokenFileFor = (key: string) => {
     const digest = NodeCrypto.createHash("sha256").update(key).digest("hex");
-    return path.join(tokenDir, `${digest}.token`);
+    return path.join(tokenDir, `${digest}-${NodeCrypto.randomUUID()}.token`);
   };
 
-  const gitHardeningEnvironment = {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "core.hooksPath",
-    GIT_CONFIG_VALUE_0: emptyHooksDir,
-  } satisfies NodeJS.ProcessEnv;
-
-  const processEnvironment = Effect.gen(function* () {
+  const gitProcessEnvironment = Effect.gen(function* () {
     const sessionId = yield* currentSessionId;
     const token = yield* getTokenForSession(sessionId);
-    if (Option.isNone(token)) return Option.none<NodeJS.ProcessEnv>();
-    const tokenFile = tokenFileFor(sessionId);
+    if (Option.isNone(token)) return Option.none<GitHubGitEnvironmentLease>();
+    const key = credentialKey(sessionId);
+    const tokenFile = tokenFileFor(key);
     yield* fileSystem
       .writeFileString(tokenFile, token.value)
       .pipe(Effect.mapError((cause) => error("write-token-file", cause)));
     yield* fileSystem
       .chmod(tokenFile, 0o600)
       .pipe(Effect.mapError((cause) => error("protect-token-file", cause)));
-    return Option.some<NodeJS.ProcessEnv>({
-      ...gitHardeningEnvironment,
-      GIT_ASKPASS: platform === "win32" ? windowsScriptPath : posixScriptPath,
-      GIT_ASKPASS_REQUIRE: "force",
-      GIT_TERMINAL_PROMPT: "0",
-      T3_GITHUB_NODE_EXECUTABLE: process.execPath,
-      T3_GITHUB_ASKPASS_SCRIPT: scriptPath,
-      T3_GITHUB_TOKEN_FILE: tokenFile,
-      ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    yield* Ref.update(tokenFiles, (current) => {
+      const next = new Map(current);
+      next.set(key, new Set([...(current.get(key) ?? []), tokenFile]));
+      return next;
+    });
+    const release = fileSystem.remove(tokenFile, { force: true }).pipe(
+      Effect.ignore,
+      Effect.andThen(
+        Ref.update(tokenFiles, (current) => {
+          const remaining = new Set(current.get(key) ?? []);
+          remaining.delete(tokenFile);
+          const next = new Map(current);
+          if (remaining.size === 0) next.delete(key);
+          else next.set(key, remaining);
+          return next;
+        }),
+      ),
+    );
+    return Option.some<GitHubGitEnvironmentLease>({
+      environment: {
+        [BROKER_HOOKS_PATH_KEY]: emptyHooksDir,
+        GIT_ASKPASS: platform === "win32" ? windowsScriptPath : posixScriptPath,
+        GIT_ASKPASS_REQUIRE: "force",
+        GIT_TERMINAL_PROMPT: "0",
+        T3_GITHUB_NODE_EXECUTABLE: process.execPath,
+        T3_GITHUB_ASKPASS_SCRIPT: scriptPath,
+        T3_GITHUB_TOKEN_FILE: tokenFile,
+        ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+      },
+      release,
     });
   });
 
@@ -190,9 +249,7 @@ export const make = Effect.gen(function* () {
         const next = new Map(entries);
         next.delete(sessionId);
         return next;
-      }).pipe(
-        Effect.andThen(fileSystem.remove(tokenFileFor(Option.some(sessionId))).pipe(Effect.ignore)),
-      ),
+      }).pipe(Effect.andThen(cleanupTokenFiles(credentialKey(Option.some(sessionId))))),
     getToken,
     setPersistentToken: (token) =>
       secrets
@@ -200,16 +257,11 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.mapError((cause) => error("persist-token", cause))),
     clearPersistentToken: secrets.remove(PERSISTED_GITHUB_TOKEN).pipe(
       Effect.mapError((cause) => error("clear-token", cause)),
-      Effect.andThen(fileSystem.remove(tokenFileFor(Option.none())).pipe(Effect.ignore)),
+      Effect.andThen(cleanupTokenFiles(credentialKey(Option.none()))),
     ),
-    processEnvironment,
+    gitProcessEnvironment,
     cliEnvironment: getToken.pipe(
-      Effect.map(
-        Option.map((token) => ({
-          ...gitHardeningEnvironment,
-          GH_TOKEN: token,
-        })),
-      ),
+      Effect.map(Option.map((token) => ({ GH_TOKEN: token }))),
     ),
   });
 });

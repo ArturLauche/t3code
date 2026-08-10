@@ -1,4 +1,7 @@
 import { Sandbox, type SandboxInfo } from "e2b";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import type {
   CloudSandboxCreateInput,
   CloudSandboxRecord,
@@ -10,6 +13,9 @@ import {
   type SandboxProviderAdapter,
   type SandboxProviderCredential,
 } from "../provider.ts";
+
+const currentEpochMillis = (): number => Effect.runSync(Clock.currentTimeMillis);
+const currentIso = (): string => DateTime.formatIso(DateTime.makeUnsafe(currentEpochMillis()));
 
 const lifecycle = {
   connect: true,
@@ -50,7 +56,7 @@ export function toRecord(connectionId: string, info: SandboxInfo): CloudSandboxR
     persistent: info.lifecycle?.onTimeout === "pause",
     associatedProject: null,
     createdAt: info.startedAt.toISOString(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: currentIso(),
     lifecycle,
   };
 }
@@ -65,6 +71,7 @@ export function createOptions(credential: SandboxProviderCredential, input: E2bS
       "t3-code": "true",
       ...(input.name ? { "t3-name": input.name } : {}),
       "t3-ephemeral": input.ephemeral ? "true" : "false",
+      "t3-timeout-ms": String(timeoutMs),
     },
     lifecycle: {
       onTimeout: timeoutAction === "delete" ? ("kill" as const) : ("pause" as const),
@@ -89,11 +96,15 @@ export function makeE2bSandboxProvider(input: {
     safely("get", async () => toRecord(input.connectionId, await getInfo(sandboxId)));
   const remainingTimeoutMs = async (sandboxId: string) => {
     const info = await getInfo(sandboxId);
-    const remaining = info.endAt.getTime() - new Date().getTime();
-    if (!Number.isFinite(remaining) || remaining <= 0) {
-      throw new Error(`Sandbox ${sandboxId} has reached its configured timeout.`);
+    const remaining = info.endAt.getTime() - currentEpochMillis();
+    if (Number.isFinite(remaining) && remaining > 0) {
+      return Math.max(1, Math.floor(remaining));
     }
-    return Math.max(1, Math.floor(remaining));
+    const configuredTimeoutMs = Number(info.metadata["t3-timeout-ms"]);
+    if (info.state === "paused" && Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0) {
+      return Math.floor(configuredTimeoutMs);
+    }
+    throw new Error(`Sandbox ${sandboxId} has reached its configured timeout.`);
   };
   const connectInstance = async (sandboxId: string) =>
     Sandbox.connect(sandboxId, {

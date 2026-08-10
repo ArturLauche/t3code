@@ -97,6 +97,7 @@ export function GitHubConnectionSettingsSection() {
   const [authorization, setAuthorization] = useState<GitHubDeviceAuthorization | null>(null);
   const [pending, setPending] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!bridge) return;
@@ -110,40 +111,47 @@ export function GitHubConnectionSettingsSection() {
     };
   }, [refresh]);
 
-  const poll = useCallback(async () => {
-    if (!bridge || !authorization) return;
-    try {
-      const next = await bridge.pollGitHubDeviceAuthorization();
-      setStatus(next);
-      if (next.state === "authorizing") {
-        pollTimer.current = setTimeout(
-          () => void poll(),
-          Math.max(authorization.intervalSeconds, 2) * 1_000,
-        );
-      } else {
+  useEffect(() => {
+    if (!bridge || !authorization || !pending) return;
+    const generation = ++pollGeneration.current;
+    let cancelled = false;
+    const runPoll = async () => {
+      try {
+        const next = await bridge.pollGitHubDeviceAuthorization();
+        if (cancelled || generation !== pollGeneration.current) return;
+        setStatus(next);
+        if (next.state === "authorizing") {
+          pollTimer.current = setTimeout(
+            () => void runPoll(),
+            Math.max(authorization.intervalSeconds, 2) * 1_000,
+          );
+        } else {
+          setAuthorization(null);
+          setPending(false);
+        }
+      } catch (cause) {
+        if (cancelled || generation !== pollGeneration.current) return;
         setAuthorization(null);
         setPending(false);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not connect GitHub",
+            description: message(cause),
+          }),
+        );
       }
-    } catch (cause) {
-      setPending(false);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not connect GitHub",
-          description: message(cause),
-        }),
-      );
-    }
-  }, [authorization, bridge]);
-
-  useEffect(() => {
-    if (authorization && pending) {
-      pollTimer.current = setTimeout(() => void poll(), authorization.intervalSeconds * 1_000);
-    }
+    };
+    pollTimer.current = setTimeout(
+      () => void runPoll(),
+      Math.max(authorization.intervalSeconds, 2) * 1_000,
+    );
     return () => {
+      cancelled = true;
+      pollGeneration.current += 1;
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };
-  }, [authorization, pending, poll]);
+  }, [authorization, bridge, pending]);
 
   if (!bridge) return null;
 
@@ -174,9 +182,22 @@ export function GitHubConnectionSettingsSection() {
   };
 
   const disconnect = async () => {
-    await bridge.disconnectGitHub();
-    setAuthorization(null);
-    await refresh();
+    setPending(true);
+    try {
+      await bridge.disconnectGitHub();
+      setAuthorization(null);
+      await refresh();
+    } catch (cause) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not disconnect GitHub",
+          description: message(cause),
+        }),
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
   return (

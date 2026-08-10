@@ -1747,9 +1747,7 @@ export function ConnectionsSettings() {
     () =>
       environments
         .filter(
-          (environment) =>
-            environment.entry.target._tag !== "PrimaryConnectionTarget" &&
-            environment.entry.target._tag !== "CloudSandboxConnectionTarget",
+          (environment) => environment.entry.target._tag !== "PrimaryConnectionTarget",
         )
         .toSorted((left, right) => left.label.localeCompare(right.label)),
     [environments],

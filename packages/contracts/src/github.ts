@@ -80,7 +80,6 @@ export type GitHubRepositoryListResult = typeof GitHubRepositoryListResult.Type;
 
 export const GitHubCredentialInjectionInput = Schema.Struct({
   token: TrimmedNonEmptyString,
-  expiresAt: Schema.optionalKey(Schema.String),
   ttlSeconds: Schema.optionalKey(NonNegativeInt),
 });
 export type GitHubCredentialInjectionInput = typeof GitHubCredentialInjectionInput.Type;

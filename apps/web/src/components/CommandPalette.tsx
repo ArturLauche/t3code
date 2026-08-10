@@ -650,6 +650,7 @@ function OpenCommandPaletteDialog(props: {
     readonly CloudSandboxProviderConnection[]
   >([]);
   const [isCreatingEphemeralSandbox, setIsCreatingEphemeralSandbox] = useState(false);
+  const ephemeralSandboxCreationRef = useRef(false);
   const projectGroupingSettings = useMemo(
     () => selectProjectGroupingSettings(clientSettings),
     [clientSettings],
@@ -1319,7 +1320,8 @@ function OpenCommandPaletteDialog(props: {
   const createEphemeralSandboxForProvider = useCallback(
     async (connection: CloudSandboxProviderConnection): Promise<void> => {
       const bridge = window.desktopBridge;
-      if (!bridge || isCreatingEphemeralSandbox) return;
+      if (!bridge || ephemeralSandboxCreationRef.current) return;
+      ephemeralSandboxCreationRef.current = true;
       setIsCreatingEphemeralSandbox(true);
       try {
         const sandbox = await bridge.createCloudSandbox(
@@ -1355,6 +1357,7 @@ function OpenCommandPaletteDialog(props: {
           }),
         );
       } finally {
+        ephemeralSandboxCreationRef.current = false;
         setIsCreatingEphemeralSandbox(false);
       }
     },
@@ -1362,7 +1365,6 @@ function OpenCommandPaletteDialog(props: {
       buildAddProjectSourceGroups,
       connectSandboxEnvironment,
       githubConnection?.state,
-      isCreatingEphemeralSandbox,
       pushPaletteView,
     ],
   );
@@ -1372,7 +1374,10 @@ function OpenCommandPaletteDialog(props: {
       const environment = environments.find(
         (candidate) => candidate.environmentId === environmentId,
       );
-      if (!canCreateProjectInEnvironment(environment?.connection.phase)) {
+      if (
+        environment === undefined ||
+        !canCreateProjectInEnvironment(environment.connection.phase)
+      ) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
@@ -1384,13 +1389,17 @@ function OpenCommandPaletteDialog(props: {
       }
       setAddProjectEnvironmentId(environmentId);
       setAddProjectCloneFlow(null);
+      const centralGitHubAvailable =
+        githubConnection?.state === "connected" &&
+        environment.entry.target._tag !== "RelayConnectionTarget" &&
+        environment.entry.target._tag !== "BearerConnectionTarget";
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
         groups: buildAddProjectSourceGroups(
           environmentId,
           buildAddProjectRemoteSourceReadiness(
             browseEnvironmentId === environmentId ? sourceControlDiscovery.data : null,
-            githubConnection?.state === "connected",
+            centralGitHubAvailable,
           ),
         ),
       });
@@ -1693,7 +1702,9 @@ function OpenCommandPaletteDialog(props: {
           addProjectEnvironmentId,
           buildAddProjectRemoteSourceReadiness(
             sourceControlDiscovery.data,
-            githubConnection?.state === "connected",
+            githubConnection?.state === "connected" &&
+              browseEnvironment?.entry.target._tag !== "RelayConnectionTarget" &&
+              browseEnvironment?.entry.target._tag !== "BearerConnectionTarget",
           ),
         )
       : (currentView?.groups ?? rootGroups);
@@ -2048,27 +2059,28 @@ function OpenCommandPaletteDialog(props: {
     }
 
     setIsRemoteProjectCloning(true);
-    if (
-      addProjectCloneFlow.source === "github" &&
-      githubConnection?.state === "connected" &&
-      window.desktopBridge &&
-      Option.isSome(browsePreparedConnection)
-    ) {
+    if (addProjectCloneFlow.source === "github" && githubConnection?.state === "connected") {
       try {
-        const prepared = browsePreparedConnection.value;
-        const environmentAccessToken =
-          prepared.httpAuthorization?._tag === "Bearer"
-            ? prepared.httpAuthorization.token
-            : prepared.target._tag === "PrimaryConnectionTarget"
-              ? await window.desktopBridge.getLocalEnvironmentBearerToken()
-              : null;
-        if (environmentAccessToken === null) {
-          throw new Error("The selected environment did not provide a credential bridge.");
+        const bridge = window.desktopBridge;
+        if (!bridge || Option.isNone(browsePreparedConnection)) {
+          throw new Error("The selected environment is not ready for GitHub credential sync.");
         }
-        await window.desktopBridge.syncGitHubCredential({
-          httpBaseUrl: prepared.httpBaseUrl,
-          environmentAccessToken,
+        const prepared = browsePreparedConnection.value;
+        if (
+          prepared.target._tag === "RelayConnectionTarget" ||
+          prepared.target._tag === "BearerConnectionTarget"
+        ) {
+          throw new Error("Central GitHub credentials are not available for this connection type.");
+        }
+        if (prepared.target._tag === "PrimaryConnectionTarget") {
+          await bridge.getLocalEnvironmentBearerToken();
+        }
+        const synchronized = await bridge.syncGitHubCredential({
+          environmentId: prepared.target.environmentId,
         });
+        if (!synchronized) {
+          throw new Error("The selected environment did not register a trusted credential target.");
+        }
       } catch (cause) {
         setIsRemoteProjectCloning(false);
         toastManager.add(
