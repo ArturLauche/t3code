@@ -34,7 +34,7 @@ jobs:
 
       - name: Keep workflow-file changes for connector cleanup
         run: |
-          git restore .github/workflows/build-fork.yml
+          git restore .github/workflows/build-fork.yml .github/workflows/ci.yml
           git rm scripts/pr2-finalize.py
 
       - name: Commit review fixes
