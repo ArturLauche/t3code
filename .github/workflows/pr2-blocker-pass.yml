@@ -1,0 +1,51 @@
+name: PR 2 blocker pass
+
+on:
+  push:
+    branches:
+      - agent/execution-environments-github-sandboxes
+    paths:
+      - .github/workflows/pr2-blocker-pass.yml
+
+concurrency:
+  group: pr2-blocker-pass
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    # Required only for the final guarded push after repository code has run without credentials.
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout triggering commit without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/${{ github.repository }}.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach "$GITHUB_SHA"
+
+      - name: Apply blocker fixes
+        run: python scripts/pr2-blocker-pass.py
+
+      - name: Remove temporary patch
+        run: git rm -f scripts/pr2-blocker-pass.py
+
+      - name: Commit and guarded push
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "Artur Lauche"
+          git config user.email "118263652+ArturLauche@users.noreply.github.com"
+          git add -u
+          git diff --cached --check
+          git commit -m "fix: close final PR blockers"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
+            push --force-with-lease=refs/heads/agent/execution-environments-github-sandboxes:"$GITHUB_SHA" \
+            origin HEAD:agent/execution-environments-github-sandboxes
