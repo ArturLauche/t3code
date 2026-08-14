@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -16,6 +17,7 @@ import {
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as GitHubCredentialBroker from "../sourceControl/GitHubCredentialBroker.ts";
 
 export interface VcsProcessInput {
   readonly operation: string;
@@ -88,8 +90,47 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
 
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const githubBroker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
 
-  const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
+  const run = Effect.fn("VcsProcess.run")((input: VcsProcessInput) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const githubLease =
+          Option.isSome(githubBroker) && input.command === "git"
+            ? yield* Effect.acquireRelease(
+                githubBroker.value.gitProcessEnvironment.pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                      operation: error.operation,
+                    }).pipe(
+                      Effect.as(Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>()),
+                    ),
+                  ),
+                ),
+                (lease) => (Option.isSome(lease) ? lease.value.release : Effect.void),
+              )
+            : Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>();
+    const githubCliEnvironment =
+      Option.isSome(githubBroker) && input.command === "gh"
+        ? yield* githubBroker.value.cliEnvironment.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not prepare GitHub CLI credentials.", {
+                operation: error.operation,
+              }).pipe(Effect.as(Option.none<NodeJS.ProcessEnv>())),
+            ),
+          )
+        : Option.none<NodeJS.ProcessEnv>();
+    const baseEnvironment = { ...process.env, ...input.env };
+    const processEnvironment = Option.isSome(githubLease)
+      ? GitHubCredentialBroker.mergeGitHubGitEnvironment(
+          baseEnvironment,
+          githubLease.value.environment,
+        )
+      : {
+          ...process.env,
+          ...(Option.isSome(githubCliEnvironment) ? githubCliEnvironment.value : {}),
+          ...input.env,
+        };
     const baseError = {
       operation: input.operation,
       command: input.command,
@@ -104,7 +145,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
+        env: processEnvironment,
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: "truncate",
@@ -157,14 +198,16 @@ export const make = Effect.gen(function* () {
       );
     }
 
-    return {
-      exitCode: result.code,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      stdoutTruncated: result.stdoutTruncated,
-      stderrTruncated: result.stderrTruncated,
-    } satisfies VcsProcessOutput;
-  });
+        return {
+          exitCode: result.code,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          stdoutTruncated: result.stdoutTruncated,
+          stderrTruncated: result.stderrTruncated,
+        } satisfies VcsProcessOutput;
+      }),
+    ),
+  );
 
   return VcsProcess.of({ run });
 });

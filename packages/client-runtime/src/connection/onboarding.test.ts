@@ -5,11 +5,16 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import { remoteHttpClientLayer } from "../rpc/http.ts";
-import { ClientPresentation, SshEnvironmentGateway } from "../platform/capabilities.ts";
+import {
+  ClientPresentation,
+  CloudSandboxEnvironmentGateway,
+  SshEnvironmentGateway,
+} from "../platform/capabilities.ts";
 import { BearerConnectionCredential, BearerConnectionProfile } from "./catalog.ts";
 import { BearerConnectionTarget } from "./model.ts";
 import {
   prepareBearerConnectionUpdate,
+  prepareCloudSandboxRegistration,
   preparePairingRegistration,
   prepareSshRegistration,
 } from "./onboarding.ts";
@@ -249,6 +254,55 @@ describe("connection onboarding", () => {
           environmentId: "environment-ssh",
           label: "Remote development box",
           connectionId: "ssh:environment-ssh",
+          target,
+        },
+      });
+    }),
+  );
+
+  it.effect("associates a cloud sandbox target with the existing connection architecture", () =>
+    Effect.gen(function* () {
+      const target = {
+        providerConnectionId: "daytona:work" as never,
+        provider: "daytona" as const,
+        sandboxId: "sandbox-42",
+      };
+      const registration = yield* prepareCloudSandboxRegistration({ target }).pipe(
+        Effect.provideService(
+          CloudSandboxEnvironmentGateway,
+          CloudSandboxEnvironmentGateway.of({
+            provision: () =>
+              Effect.succeed({
+                environmentId: EnvironmentId.make("environment-cloud"),
+                label: "Daytona workspace",
+                bootstrap: {
+                  target,
+                  sandbox: {} as never,
+                  environmentId: EnvironmentId.make("environment-cloud"),
+                  label: "Daytona workspace",
+                  httpBaseUrl: "http://127.0.0.1:4555",
+                  wsBaseUrl: "ws://127.0.0.1:4555",
+                  bearerToken: "bearer-token",
+                },
+                bearerToken: "bearer-token",
+              }),
+            prepare: () => Effect.die("unused"),
+            disconnect: () => Effect.die("unused"),
+          }),
+        ),
+      );
+
+      expect(registration).toMatchObject({
+        _tag: "CloudSandboxConnectionRegistration",
+        target: {
+          _tag: "CloudSandboxConnectionTarget",
+          environmentId: "environment-cloud",
+          label: "Daytona workspace",
+          connectionId: "sandbox:daytona:daytona%3Awork:sandbox-42",
+        },
+        profile: {
+          _tag: "CloudSandboxConnectionProfile",
+          environmentId: "environment-cloud",
           target,
         },
       });

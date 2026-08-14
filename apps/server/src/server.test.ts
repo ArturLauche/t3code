@@ -2,7 +2,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "node:crypto";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 
 import {
   AuthAccessTokenType,
@@ -54,6 +54,7 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -1347,9 +1348,11 @@ const assertBrowserApiCorsPreflightHeaders = (
 ) => {
   assertBrowserApiCorsResponseHeaders(headers, options);
   assert.deepEqual(splitHeaderTokens(headers["access-control-allow-methods"] ?? null), [
+    "DELETE",
     "GET",
     "OPTIONS",
     "POST",
+    "PUT",
   ]);
   assert.deepEqual(splitHeaderTokens(headers["access-control-allow-headers"]), [
     "authorization",
@@ -4278,9 +4281,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 204);
       assert.equal(response.headers["access-control-allow-origin"], "*");
       assert.deepEqual(splitHeaderTokens(response.headers["access-control-allow-methods"]), [
+        "DELETE",
         "GET",
         "OPTIONS",
         "POST",
+        "PUT",
       ]);
       assert.deepEqual(splitHeaderTokens(response.headers["access-control-allow-headers"]), [
         "authorization",
@@ -4939,8 +4944,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("reports workspace root stat failures without relabeling them as missing", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) === "win32") return;
-
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const blockedRoot = yield* fs.makeTempDirectoryScoped({
@@ -4948,7 +4951,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       const workspaceRoot = path.join(blockedRoot, "workspace");
       yield* fs.makeDirectory(workspaceRoot);
-      yield* fs.chmod(blockedRoot, 0o000);
+
+      const statFailure = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "stat",
+        pathOrDescriptor: workspaceRoot,
+        description: "Test PermissionDenied stat failure.",
+      });
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        stat: (filePath) =>
+          filePath === workspaceRoot ? Effect.fail(statFailure) : fs.stat(filePath),
+      });
 
       const result = yield* Effect.gen(function* () {
         yield* buildAppUnderTest();
@@ -4958,7 +4973,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             client[WS_METHODS.projectsListEntries]({ cwd: workspaceRoot }).pipe(Effect.result),
           ),
         );
-      }).pipe(Effect.ensuring(fs.chmod(blockedRoot, 0o700).pipe(Effect.ignore)));
+      }).pipe(Effect.provideService(FileSystem.FileSystem, failingFileSystem));
 
       if (result._tag !== "Failure" || result.failure._tag !== "ProjectListEntriesError") {
         assert.fail("Expected a ProjectListEntriesError");

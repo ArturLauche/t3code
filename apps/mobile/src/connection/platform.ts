@@ -1,11 +1,13 @@
 import {
   ClientPresentation,
+  CloudSandboxEnvironmentGateway,
   CloudSession,
   EnvironmentOwnedDataCleanup,
   PlatformConnectionSource,
   PrimaryEnvironmentAuth,
   RelayDeviceIdentity,
   SshEnvironmentGateway,
+  SourceControlCredentialGateway,
 } from "@t3tools/client-runtime/platform";
 import {
   ConnectionBlockedError,
@@ -189,6 +191,30 @@ const capabilitiesLayer = Layer.effectContext(
             ),
           disconnect: () => Effect.void,
         }),
+      ),
+      Context.add(
+        CloudSandboxEnvironmentGateway,
+        CloudSandboxEnvironmentGateway.of({
+          provision: () =>
+            Effect.fail(
+              new ConnectionBlockedError({
+                reason: "unsupported",
+                detail: "Cloud sandboxes are only available in the desktop app.",
+              }),
+            ),
+          prepare: () =>
+            Effect.fail(
+              new ConnectionBlockedError({
+                reason: "unsupported",
+                detail: "Cloud sandboxes are only available in the desktop app.",
+              }),
+            ),
+          disconnect: () => Effect.void,
+        }),
+      ),
+      Context.add(
+        SourceControlCredentialGateway,
+        SourceControlCredentialGateway.of({ sync: () => Effect.void }),
       ),
     );
   }),

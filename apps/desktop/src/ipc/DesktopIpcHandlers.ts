@@ -43,6 +43,8 @@ import {
   showContextMenu,
 } from "./methods/window.ts";
 import * as PreviewIpc from "./methods/preview.ts";
+import * as CloudSandboxIpc from "./methods/cloudSandbox.ts";
+import * as GitHubIpc from "./methods/github.ts";
 import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
@@ -68,6 +70,25 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(fetchSshSessionState);
   yield* ipc.handle(issueSshWebSocketTicket);
   yield* ipc.handle(resolveSshPasswordPrompt);
+
+  yield* ipc.handle(CloudSandboxIpc.listCloudSandboxProviderConnections);
+  yield* ipc.handle(CloudSandboxIpc.saveCloudSandboxProviderConnection);
+  yield* ipc.handle(CloudSandboxIpc.validateCloudSandboxProviderConnection);
+  yield* ipc.handle(CloudSandboxIpc.removeCloudSandboxProviderConnection);
+  yield* ipc.handle(CloudSandboxIpc.listCloudSandboxes);
+  yield* ipc.handle(CloudSandboxIpc.createCloudSandbox);
+  yield* ipc.handle(CloudSandboxIpc.ensureCloudSandbox);
+  yield* ipc.handle(CloudSandboxIpc.disconnectCloudSandbox);
+  yield* ipc.handle(CloudSandboxIpc.runCloudSandboxLifecycleAction);
+  yield* ipc.handle(CloudSandboxIpc.associateCloudSandboxProject);
+
+  yield* ipc.handle(GitHubIpc.getGitHubConnectionStatus);
+  yield* ipc.handle(GitHubIpc.connectGitHubPersonalAccessToken);
+  yield* ipc.handle(GitHubIpc.startGitHubDeviceAuthorization);
+  yield* ipc.handle(GitHubIpc.pollGitHubDeviceAuthorization);
+  yield* ipc.handle(GitHubIpc.disconnectGitHub);
+  yield* ipc.handle(GitHubIpc.listGitHubRepositories);
+  yield* ipc.handle(GitHubIpc.syncGitHubCredential);
 
   yield* ipc.handle(getServerExposureState);
   yield* ipc.handle(setServerExposureMode);

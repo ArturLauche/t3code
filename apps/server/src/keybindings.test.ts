@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -22,8 +23,8 @@ const encodeResolvedKeybindingFromConfig = Schema.encodeEffect(
 const decodeResolvedKeybindingFromConfigExit = Schema.decodeUnknownExit(
   Keybindings.ResolvedKeybindingFromConfig,
 );
-const makeKeybindingsLayer = () => {
-  return Keybindings.layer.pipe(
+const makeKeybindingsLayer = (fileSystem?: FileSystem.FileSystem) => {
+  const layer = Keybindings.layer.pipe(
     Layer.provideMerge(
       Layer.fresh(
         ServerConfig.layerTest(process.cwd(), {
@@ -32,6 +33,9 @@ const makeKeybindingsLayer = () => {
       ),
     ),
   );
+  return fileSystem
+    ? layer.pipe(Layer.provide(Layer.succeed(FileSystem.FileSystem, fileSystem)))
+    : layer;
 };
 
 const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R>) =>
@@ -509,28 +513,44 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   it.effect("fails when config directory is not writable", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      const { dirname } = yield* Path.Path;
-      yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+j", command: "terminal.toggle" },
-      ]);
-      yield* fs.chmod(dirname(keybindingsConfigPath), 0o500);
+      let failWrites = false;
+      const cause = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "writeFileString",
+        pathOrDescriptor: "keybindings.json",
+        description: "Test PermissionDenied write failure.",
+      });
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        writeFileString: (filePath, contents, options) =>
+          failWrites ? Effect.fail(cause) : fs.writeFileString(filePath, contents, options),
+      });
 
-      const result = yield* Effect.gen(function* () {
-        const keybindings = yield* Keybindings.Keybindings;
-        return yield* keybindings.upsertKeybindingRule({
-          key: "mod+shift+r",
-          command: "script.run-tests.run",
-        });
-      }).pipe(toDetailResult);
-      assertFailure(result, "failed to write keybindings config");
+      yield* Effect.gen(function* () {
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        yield* writeKeybindingsConfig(keybindingsConfigPath, [
+          { key: "mod+j", command: "terminal.toggle" },
+        ]);
+        failWrites = true;
 
-      yield* fs.chmod(dirname(keybindingsConfigPath), 0o700);
+        const result = yield* Effect.gen(function* () {
+          const keybindings = yield* Keybindings.Keybindings;
+          return yield* keybindings.upsertKeybindingRule({
+            key: "mod+shift+r",
+            command: "script.run-tests.run",
+          });
+        }).pipe(toDetailResult);
+        assertFailure(result, "failed to write keybindings config");
 
-      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
-      const persistedView = persisted.map(({ key, command }) => ({ key, command }));
-      assert.deepEqual(persistedView, [{ key: "mod+j", command: "terminal.toggle" }]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+        const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+        const persistedView = persisted.map(({ key, command }) => ({ key, command }));
+        assert.deepEqual(persistedView, [{ key: "mod+j", command: "terminal.toggle" }]);
+      }).pipe(
+        Effect.provide(makeKeybindingsLayer(failingFileSystem)),
+        Effect.ensuring(Effect.sync(() => (failWrites = false))),
+      );
+    }),
   );
 
   it.effect("caches loaded resolved config across repeated reads", () =>

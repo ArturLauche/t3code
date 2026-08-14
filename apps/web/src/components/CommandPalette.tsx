@@ -19,6 +19,9 @@ import {
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
+  type CloudSandboxProviderConnection,
+  type GitHubConnectionStatus,
+  type GitHubRepositorySummary,
   type ProjectId,
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
@@ -29,6 +32,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  CloudIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -55,6 +59,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
+import { connectCloudSandbox } from "../connection/onboarding";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useClientSettings } from "../hooks/useSettings";
@@ -69,6 +74,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
+import { usePreparedConnection } from "../state/session";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -121,6 +127,11 @@ import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { ProjectFavicon } from "./ProjectFavicon";
+import {
+  executionEnvironmentPickerCategory,
+  githubRepositoryCloneSelection,
+  quickEphemeralSandboxInput,
+} from "./projectCreation.logic";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
@@ -182,6 +193,7 @@ function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
 interface AddProjectEnvironmentOption {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  readonly category: "Local" | "SSH Remote" | "Cloud Sandbox" | "Remote";
   readonly isPrimary: boolean;
   readonly isConnected: boolean;
   readonly status: string;
@@ -306,6 +318,7 @@ type AddProjectRemoteSourceReadiness = Record<
 
 function buildAddProjectRemoteSourceReadiness(
   discovery: SourceControlDiscoveryResult | null,
+  centrallyConnectedGitHub = false,
 ): AddProjectRemoteSourceReadiness {
   const unavailable = {
     ready: false,
@@ -313,7 +326,7 @@ function buildAddProjectRemoteSourceReadiness(
   } as const;
   const defaultReadiness: AddProjectRemoteSourceReadiness = {
     url: { ready: true, hint: null },
-    github: unavailable,
+    github: centrallyConnectedGitHub ? { ready: true, hint: null } : unavailable,
     gitlab: unavailable,
     bitbucket: unavailable,
     "azure-devops": unavailable,
@@ -331,6 +344,10 @@ function buildAddProjectRemoteSourceReadiness(
   for (const source of REMOTE_PROJECT_SOURCES) {
     const kind = sourceProviderKind(source);
     if (!kind) continue;
+    if (kind === "github" && centrallyConnectedGitHub) {
+      readiness[source] = { ready: true, hint: null };
+      continue;
+    }
     const provider = providerByKind.get(kind);
     if (!provider) {
       readiness[source] = unavailable;
@@ -573,6 +590,9 @@ function OpenCommandPaletteDialog(props: {
   const cloneRepository = useAtomCommand(sourceControlEnvironment.cloneRepository, {
     reportFailure: false,
   });
+  const connectSandboxEnvironment = useAtomCommand(connectCloudSandbox, {
+    reportFailure: false,
+  });
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -621,10 +641,78 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
   const [isRemoteProjectCloning, setIsRemoteProjectCloning] = useState(false);
+  const [githubConnection, setGitHubConnection] = useState<GitHubConnectionStatus | null>(null);
+  const [githubRepositories, setGitHubRepositories] = useState<readonly GitHubRepositorySummary[]>(
+    [],
+  );
+  const [isGitHubRepositoriesPending, setIsGitHubRepositoriesPending] = useState(false);
+  const [sandboxProviderConnections, setSandboxProviderConnections] = useState<
+    readonly CloudSandboxProviderConnection[]
+  >([]);
+  const [isCreatingEphemeralSandbox, setIsCreatingEphemeralSandbox] = useState(false);
+  const ephemeralSandboxCreationRef = useRef(false);
   const projectGroupingSettings = useMemo(
     () => selectProjectGroupingSettings(clientSettings),
     [clientSettings],
   );
+
+  useEffect(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge) return;
+    let active = true;
+    void Promise.all([
+      bridge.getGitHubConnectionStatus(),
+      bridge.listCloudSandboxProviderConnections(),
+    ])
+      .then(([status, connections]) => {
+        if (!active) return;
+        setGitHubConnection(status);
+        setSandboxProviderConnections(connections);
+      })
+      .catch(() => {
+        if (!active) return;
+        setGitHubConnection(null);
+        setSandboxProviderConnections([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [openIntent?.kind]);
+
+  useEffect(() => {
+    const bridge = window.desktopBridge;
+    if (
+      !bridge ||
+      githubConnection?.state !== "connected" ||
+      addProjectCloneFlow?.step !== "repository" ||
+      addProjectCloneFlow.source !== "github"
+    ) {
+      setGitHubRepositories([]);
+      setIsGitHubRepositoriesPending(false);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setIsGitHubRepositoriesPending(true);
+      void bridge
+        .listGitHubRepositories({ query: query.trim(), page: 1, perPage: 50 })
+        .then((result) => {
+          if (active) setGitHubRepositories(result.repositories);
+        })
+        .catch(() => {
+          if (active) setGitHubRepositories([]);
+        })
+        .finally(() => {
+          if (active) setIsGitHubRepositoriesPending(false);
+        });
+    }, 200);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [addProjectCloneFlow, githubConnection?.state, query]);
 
   const environmentLabelById = useMemo(
     () =>
@@ -712,6 +800,10 @@ function OpenCommandPaletteDialog(props: {
   const addProjectEnvironmentOptions = useMemo(() => {
     const options = environments.map((environment): AddProjectEnvironmentOption => {
       const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
+      const category = executionEnvironmentPickerCategory({
+        targetTag: environment.entry.target._tag,
+        desktopLocal: isDesktopLocalConnectionTarget(environment.entry.target),
+      });
       return {
         environmentId: environment.environmentId,
         label: resolveEnvironmentOptionLabel({
@@ -719,6 +811,7 @@ function OpenCommandPaletteDialog(props: {
           environmentId: environment.environmentId,
           runtimeLabel: environment.label,
         }),
+        category,
         isPrimary,
         isConnected: canCreateProjectInEnvironment(environment.connection.phase),
         status: connectionStatusText(environment.connection),
@@ -754,6 +847,7 @@ function OpenCommandPaletteDialog(props: {
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
+  const browsePreparedConnection = usePreparedConnection(browseEnvironmentId);
   // A desktop-local secondary backend (today: the WSL backend). The picker is
   // available against these too — the desktop dispatches pickFolder into the
   // backend's filesystem when routed by its instance id.
@@ -1223,12 +1317,67 @@ function OpenCommandPaletteDialog(props: {
     [openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
   );
 
+  const createEphemeralSandboxForProvider = useCallback(
+    async (connection: CloudSandboxProviderConnection): Promise<void> => {
+      const bridge = window.desktopBridge;
+      if (!bridge || ephemeralSandboxCreationRef.current) return;
+      ephemeralSandboxCreationRef.current = true;
+      setIsCreatingEphemeralSandbox(true);
+      try {
+        const sandbox = await bridge.createCloudSandbox(
+          quickEphemeralSandboxInput(connection, `t3-task-${Date.now().toString(36)}`),
+        );
+        const result = await connectSandboxEnvironment({
+          target: {
+            providerConnectionId: sandbox.providerConnectionId,
+            provider: sandbox.provider,
+            sandboxId: sandbox.sandboxId,
+          },
+          label: sandbox.name,
+        });
+        if (result._tag === "Failure") {
+          throw squashAtomCommandFailure(result);
+        }
+        const environmentId = result.value;
+        setAddProjectEnvironmentId(environmentId);
+        setAddProjectCloneFlow(null);
+        pushPaletteView({
+          addonIcon: <CloudIcon className={ADDON_ICON_CLASS} />,
+          groups: buildAddProjectSourceGroups(
+            environmentId,
+            buildAddProjectRemoteSourceReadiness(null, githubConnection?.state === "connected"),
+          ),
+        });
+      } catch (cause) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not create sandbox",
+            description: errorMessage(cause),
+          }),
+        );
+      } finally {
+        ephemeralSandboxCreationRef.current = false;
+        setIsCreatingEphemeralSandbox(false);
+      }
+    },
+    [
+      buildAddProjectSourceGroups,
+      connectSandboxEnvironment,
+      githubConnection?.state,
+      pushPaletteView,
+    ],
+  );
+
   const startAddProjectSourceSelection = useCallback(
     (environmentId: EnvironmentId): void => {
       const environment = environments.find(
         (candidate) => candidate.environmentId === environmentId,
       );
-      if (!canCreateProjectInEnvironment(environment?.connection.phase)) {
+      if (
+        environment === undefined ||
+        !canCreateProjectInEnvironment(environment.connection.phase)
+      ) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
@@ -1240,12 +1389,17 @@ function OpenCommandPaletteDialog(props: {
       }
       setAddProjectEnvironmentId(environmentId);
       setAddProjectCloneFlow(null);
+      const centralGitHubAvailable =
+        githubConnection?.state === "connected" &&
+        environment.entry.target._tag !== "RelayConnectionTarget" &&
+        environment.entry.target._tag !== "BearerConnectionTarget";
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
         groups: buildAddProjectSourceGroups(
           environmentId,
           buildAddProjectRemoteSourceReadiness(
             browseEnvironmentId === environmentId ? sourceControlDiscovery.data : null,
+            centralGitHubAvailable,
           ),
         ),
       });
@@ -1254,6 +1408,7 @@ function OpenCommandPaletteDialog(props: {
       browseEnvironmentId,
       buildAddProjectSourceGroups,
       environments,
+      githubConnection?.state,
       pushPaletteView,
       sourceControlDiscovery.data,
     ],
@@ -1263,12 +1418,15 @@ function OpenCommandPaletteDialog(props: {
     (option) => ({
       kind: "action",
       value: `action:add-project:environment:${option.environmentId}`,
-      searchTerms: [option.label, option.environmentId, option.isPrimary ? "this device" : ""],
+      searchTerms: [
+        option.label,
+        option.category,
+        option.environmentId,
+        option.isPrimary ? "this device" : "",
+      ],
       title: option.label,
       description: option.isConnected
-        ? option.isPrimary
-          ? "This device"
-          : option.environmentId
+        ? `${option.category} · ${option.isPrimary ? "This device" : option.environmentId}`
         : option.status,
       disabled: !option.isConnected,
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
@@ -1278,6 +1436,22 @@ function OpenCommandPaletteDialog(props: {
       },
     }),
   );
+
+  for (const connection of sandboxProviderConnections) {
+    addProjectEnvironmentItems.push({
+      kind: "action",
+      value: `action:add-project:environment:create-sandbox:${connection.id}`,
+      searchTerms: ["cloud", "sandbox", "ephemeral", connection.label, connection.provider],
+      title: `New ephemeral sandbox · ${connection.label}`,
+      description: "Cloud Sandbox · automatically delete after 60 minutes",
+      disabled: isCreatingEphemeralSandbox,
+      icon: <CloudIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: async () => {
+        await createEphemeralSandboxForProvider(connection);
+      },
+    });
+  }
 
   const addProjectEnvironmentGroups = useMemo<CommandPaletteView["groups"]>(
     () => [
@@ -1526,7 +1700,12 @@ function OpenCommandPaletteDialog(props: {
     currentView.groups[0]?.value === sourceSelectionViewValue
       ? buildAddProjectSourceGroups(
           addProjectEnvironmentId,
-          buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data),
+          buildAddProjectRemoteSourceReadiness(
+            sourceControlDiscovery.data,
+            githubConnection?.state === "connected" &&
+              browseEnvironment?.entry.target._tag !== "RelayConnectionTarget" &&
+              browseEnvironment?.entry.target._tag !== "BearerConnectionTarget",
+          ),
         )
       : (currentView?.groups ?? rootGroups);
 
@@ -1537,6 +1716,26 @@ function OpenCommandPaletteDialog(props: {
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
   });
+
+  const associateCloudSandboxProject = useCallback(
+    async (environmentId: EnvironmentId, projectPath: string): Promise<void> => {
+      const bridge = window.desktopBridge;
+      if (!bridge) return;
+      const environment = environments.find(
+        (candidate) => candidate.environmentId === environmentId,
+      );
+      const profile = environment ? Option.getOrNull(environment.entry.profile) : null;
+      if (profile?._tag !== "CloudSandboxConnectionProfile") return;
+      await bridge
+        .associateCloudSandboxProject({
+          providerConnectionId: profile.target.providerConnectionId,
+          sandboxId: profile.target.sandboxId,
+          project: projectPath,
+        })
+        .catch(() => undefined);
+    },
+    [environments],
+  );
 
   const handleAddProjectForEnvironment = useCallback(
     async (input: {
@@ -1590,6 +1789,7 @@ function OpenCommandPaletteDialog(props: {
         cwd,
       );
       if (existing) {
+        await associateCloudSandboxProject(input.environmentId, existing.workspaceRoot);
         const latestThread = getLatestThreadForProject(
           threads.filter((thread) => thread.environmentId === existing.environmentId),
           existing.id,
@@ -1654,6 +1854,8 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
+      await associateCloudSandboxProject(input.environmentId, cwd);
+
       const navigationResult = await settlePromise(() =>
         handleNewThread(scopeProjectRef(input.environmentId, projectId)),
       );
@@ -1671,6 +1873,7 @@ function OpenCommandPaletteDialog(props: {
       setOpen(false);
     },
     [
+      associateCloudSandboxProject,
       handleNewThread,
       createProject,
       environments,
@@ -1705,6 +1908,28 @@ function OpenCommandPaletteDialog(props: {
   function getDefaultCloneParentPath(environmentId: EnvironmentId): string {
     return getAddProjectInitialQueryForEnvironment(environmentId);
   }
+
+  const continueWithGitHubRepository = useCallback(
+    (
+      repository: Pick<GitHubRepositorySummary, "nameWithOwner" | "url" | "sshUrl" | "cloneUrl">,
+    ): void => {
+      if (addProjectCloneFlow?.step !== "repository") return;
+      const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
+      const selection = githubRepositoryCloneSelection(repository);
+      setAddProjectCloneFlow({
+        step: "confirm",
+        environmentId: addProjectCloneFlow.environmentId,
+        source: "github",
+        repositoryInput: repository.nameWithOwner,
+        repository: selection.repository,
+        remoteUrl: selection.remoteUrl,
+      });
+      setHighlightedItemValue(null);
+      setQuery(destinationPath);
+      setBrowseGeneration((generation) => generation + 1);
+    },
+    [addProjectCloneFlow, getAddProjectInitialQueryForEnvironment],
+  );
 
   async function submitAddProjectCloneFlow(destinationPathInput?: string): Promise<void> {
     if (!addProjectCloneFlow) {
@@ -1742,6 +1967,26 @@ function OpenCommandPaletteDialog(props: {
         setQuery(destinationPath);
         setBrowseGeneration((generation) => generation + 1);
         return;
+      }
+
+      if (provider === "github" && githubConnection?.state === "connected") {
+        const listed = githubRepositories.find(
+          (repository) => repository.nameWithOwner.toLowerCase() === rawRepository.toLowerCase(),
+        );
+        if (listed) {
+          continueWithGitHubRepository(listed);
+          return;
+        }
+        if (/^[^/\s]+\/[^/\s]+$/.test(rawRepository)) {
+          const repositoryUrl = `https://github.com/${rawRepository}`;
+          continueWithGitHubRepository({
+            nameWithOwner: rawRepository,
+            url: repositoryUrl,
+            cloneUrl: `${repositoryUrl}.git`,
+            sshUrl: `git@github.com:${rawRepository}.git`,
+          });
+          return;
+        }
       }
 
       setIsRemoteProjectLookingUp(true);
@@ -1817,6 +2062,40 @@ function OpenCommandPaletteDialog(props: {
     }
 
     setIsRemoteProjectCloning(true);
+    if (addProjectCloneFlow.source === "github" && githubConnection?.state === "connected") {
+      try {
+        const bridge = window.desktopBridge;
+        if (!bridge || Option.isNone(browsePreparedConnection)) {
+          throw new Error("The selected environment is not ready for GitHub credential sync.");
+        }
+        const prepared = browsePreparedConnection.value;
+        if (
+          prepared.target._tag === "RelayConnectionTarget" ||
+          prepared.target._tag === "BearerConnectionTarget"
+        ) {
+          throw new Error("Central GitHub credentials are not available for this connection type.");
+        }
+        if (prepared.target._tag === "PrimaryConnectionTarget") {
+          await bridge.getLocalEnvironmentBearerToken();
+        }
+        const synchronized = await bridge.syncGitHubCredential({
+          environmentId: prepared.target.environmentId,
+        });
+        if (!synchronized) {
+          throw new Error("The selected environment did not register a trusted credential target.");
+        }
+      } catch (cause) {
+        setIsRemoteProjectCloning(false);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "GitHub credential unavailable",
+            description: errorMessage(cause),
+          }),
+        );
+        return;
+      }
+    }
     const cloneResult = await cloneRepository({
       environmentId: addProjectCloneFlow.environmentId,
       input: {
@@ -1910,9 +2189,51 @@ function OpenCommandPaletteDialog(props: {
     };
   }, [addProjectCloneFlow]);
 
+  const githubRepositoryGroups = useMemo<CommandPaletteView["groups"]>(
+    () =>
+      addProjectCloneFlow?.step === "repository" &&
+      addProjectCloneFlow.source === "github" &&
+      githubConnection?.state === "connected"
+        ? [
+            {
+              value: "github-repositories",
+              label: githubConnection.account
+                ? `${githubConnection.account.login}'s repositories`
+                : "GitHub repositories",
+              items: githubRepositories.map(
+                (repository): CommandPaletteActionItem => ({
+                  kind: "action",
+                  value: `github-repository:${repository.id}`,
+                  searchTerms: [
+                    repository.name,
+                    repository.nameWithOwner,
+                    repository.description ?? "",
+                    repository.private ? "private" : "public",
+                  ],
+                  title: repository.nameWithOwner,
+                  description: [
+                    repository.private ? "Private" : "Public",
+                    repository.archived ? "Archived" : null,
+                    repository.description,
+                  ]
+                    .filter(Boolean)
+                    .join(" · "),
+                  icon: <GitHubIcon className={ITEM_ICON_CLASS} />,
+                  keepOpen: true,
+                  run: async () => {
+                    continueWithGitHubRepository(repository);
+                  },
+                }),
+              ),
+            },
+          ]
+        : [],
+    [addProjectCloneFlow, continueWithGitHubRepository, githubConnection, githubRepositories],
+  );
+
   let displayedGroups: CommandPaletteView["groups"] = filteredGroups;
   if (addProjectCloneFlow?.step === "repository") {
-    displayedGroups = [];
+    displayedGroups = githubRepositoryGroups;
   } else if (addProjectCloneFlow?.step === "confirm") {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
@@ -2016,6 +2337,13 @@ function OpenCommandPaletteDialog(props: {
 
     if (addProjectCloneFlow?.step === "repository" && event.key === "Enter") {
       event.preventDefault();
+      const selectedRepository = displayedGroups
+        .flatMap((group) => group.items)
+        .find((item) => item.value === highlightedItemValue);
+      if (selectedRepository?.value.startsWith("github-repository:")) {
+        executeItem(selectedRepository);
+        return;
+      }
       void submitAddProjectCloneFlow();
       return;
     }
@@ -2346,7 +2674,12 @@ function OpenCommandPaletteDialog(props: {
               emptyStateMessage:
                 addProjectCloneFlow.source === "url"
                   ? "Enter a Git clone URL and press Enter to continue."
-                  : "Enter a repository path and press Enter to look it up.",
+                  : addProjectCloneFlow.source === "github" &&
+                      githubConnection?.state === "connected"
+                    ? isGitHubRepositoriesPending
+                      ? "Loading your GitHub repositories…"
+                      : "Search your repositories or enter owner/repository."
+                    : "Enter a repository path and press Enter to look it up.",
             }
           : addProjectCloneFlow?.step === "confirm"
             ? { emptyStateMessage: "Choose a destination path and press Enter to clone." }

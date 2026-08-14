@@ -32,10 +32,11 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import * as IpcChannels from "../channels.ts";
-import * as DesktopIpc from "../DesktopIpc.ts";
+import * as DesktopGitHubIntegration from "../../github/DesktopGitHubIntegration.ts";
 import * as DesktopSshEnvironment from "../../ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "../../ssh/DesktopSshPasswordPrompts.ts";
+import * as IpcChannels from "../channels.ts";
+import * as DesktopIpc from "../DesktopIpc.ts";
 
 type DesktopSshEnvironmentRequestOperation =
   | "fetch-environment-descriptor"
@@ -58,21 +59,11 @@ function readSshHttpStatus(cause: DesktopSshEnvironmentRequestCause): number | n
   ) {
     return cause.status ?? null;
   }
-  if (isEnvironmentRequestInvalidError(cause)) {
-    return 400;
-  }
-  if (isEnvironmentAuthInvalidError(cause)) {
-    return 401;
-  }
-  if (isEnvironmentScopeRequiredError(cause)) {
-    return 403;
-  }
-  if (isEnvironmentOperationForbiddenError(cause)) {
-    return 403;
-  }
-  if (isEnvironmentInternalError(cause)) {
-    return 500;
-  }
+  if (isEnvironmentRequestInvalidError(cause)) return 400;
+  if (isEnvironmentAuthInvalidError(cause)) return 401;
+  if (isEnvironmentScopeRequiredError(cause)) return 403;
+  if (isEnvironmentOperationForbiddenError(cause)) return 403;
+  if (isEnvironmentInternalError(cause)) return 500;
   return null;
 }
 
@@ -168,12 +159,34 @@ export const bootstrapSshBearerSession = DesktopIpc.makeIpcMethod({
     httpBaseUrl,
     credential,
   }) {
-    return yield* withLoopbackSshApi("bootstrap-bearer-session", (resolvedHttpBaseUrl) =>
+    const github = yield* DesktopGitHubIntegration.DesktopGitHubIntegration;
+    const access = yield* withLoopbackSshApi("bootstrap-bearer-session", (resolvedHttpBaseUrl) =>
       bootstrapRemoteBearerSession({
         httpBaseUrl: resolvedHttpBaseUrl,
         credential,
       }),
     )(httpBaseUrl);
+    yield* withLoopbackSshApi(
+      "register-github-environment",
+      (resolvedHttpBaseUrl) =>
+        Effect.gen(function* () {
+          const descriptor = yield* fetchRemoteEnvironmentDescriptor({
+            httpBaseUrl: resolvedHttpBaseUrl,
+          });
+          yield* github.registerTrustedEnvironment({
+            environmentId: descriptor.environmentId,
+            httpBaseUrl: resolvedHttpBaseUrl,
+            accessToken: access.access_token,
+          });
+        }),
+    )(httpBaseUrl).pipe(
+      Effect.catch(() =>
+        Effect.logWarning("Could not register the optional GitHub credential bridge for SSH.", {
+          reason: "registration-failed",
+        }),
+      ),
+    );
+    return access;
   }),
 });
 

@@ -34,10 +34,12 @@ import {
   collectProcessOutput,
   getLastNonEmptyOutputLine,
   remoteStateKey,
+  redactSshCommandForLogs,
   resolveSshCommand,
   resolveSshTarget,
   runSshCommand,
   targetConnectionKey,
+  usesEphemeralUsernameCredential,
 } from "./command.ts";
 import {
   SshCommandError,
@@ -110,7 +112,7 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
   return {
     alias: target.alias,
     hostname: target.hostname,
-    username: target.username,
+    hasUsername: target.username !== null,
     port: target.port,
   };
 }
@@ -979,7 +981,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     hostSpec,
   ];
   const sshCommand = yield* resolveSshCommand;
-  const tunnelCommand = [sshCommand, ...args];
+  const tunnelCommand = redactSshCommandForLogs(input.resolvedTarget, [sshCommand, ...args]);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
@@ -1200,6 +1202,17 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     target: DesktopSshEnvironmentTarget,
     attempt: number,
   ): Effect.fn.Return<string, SshInvalidTargetError | SshPasswordPromptError, SshPasswordPrompt> {
+    // Daytona encodes a short-lived SSH access token in the username. It must never be
+    // copied into a password dialog (or offered back as a conventional SSH username).
+    if (usesEphemeralUsernameCredential(target)) {
+      yield* Effect.logWarning("ssh.auth.ephemeralCredential.rejected", {
+        ...sshTargetLogFields(target),
+        attempt,
+      });
+      return yield* new SshPasswordPromptError({
+        message: "The temporary sandbox SSH credential was rejected. Reconnect to refresh it.",
+      });
+    }
     const promptService = yield* SshPasswordPrompt;
     const hostSpec = yield* buildSshHostSpecEffect(target);
     if (!promptService.isAvailable) {

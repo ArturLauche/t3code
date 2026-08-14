@@ -1,4 +1,8 @@
-import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contracts";
+import type {
+  DesktopCloudSandboxTarget,
+  DesktopSshEnvironmentTarget,
+  EnvironmentId,
+} from "@t3tools/contracts";
 import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -20,6 +24,8 @@ import {
   type ConnectionCredential,
   SshConnectionProfile,
   SshConnectionRegistration,
+  CloudSandboxConnectionProfile,
+  CloudSandboxConnectionRegistration,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import { mapRemoteEnvironmentError } from "./errors.ts";
@@ -27,6 +33,7 @@ import {
   BearerConnectionTarget,
   ConnectionBlockedError,
   SshConnectionTarget,
+  CloudSandboxConnectionTarget,
   type ConnectionAttemptError,
 } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
@@ -40,6 +47,11 @@ export interface PairingConnectionInput {
 
 export interface SshConnectionInput {
   readonly target: DesktopSshEnvironmentTarget;
+  readonly label?: string;
+}
+
+export interface CloudSandboxConnectionInput {
+  readonly target: DesktopCloudSandboxTarget;
   readonly label?: string;
 }
 
@@ -60,6 +72,12 @@ export class ConnectionOnboarding extends Context.Service<
     >;
     readonly registerSsh: (
       input: SshConnectionInput,
+    ) => Effect.Effect<
+      EnvironmentId,
+      ConnectionAttemptError | Persistence.ConnectionPersistenceError
+    >;
+    readonly registerCloudSandbox: (
+      input: CloudSandboxConnectionInput,
     ) => Effect.Effect<
       EnvironmentId,
       ConnectionAttemptError | Persistence.ConnectionPersistenceError
@@ -242,11 +260,49 @@ export const registerSshConnection = Effect.fn(
   return registration.target.environmentId;
 });
 
+export const prepareCloudSandboxRegistration = Effect.fn(
+  "clientRuntime.connection.onboarding.prepareCloudSandboxRegistration",
+)(function* (input: CloudSandboxConnectionInput) {
+  const gateway = yield* ClientCapabilities.CloudSandboxEnvironmentGateway;
+  const provisioned = yield* gateway.provision(input.target);
+  const connectionId = `sandbox:${[
+    input.target.provider,
+    input.target.providerConnectionId,
+    input.target.sandboxId,
+  ]
+    .map(encodeURIComponent)
+    .join(":")}`;
+  const label = input.label?.trim() || provisioned.label;
+  return new CloudSandboxConnectionRegistration({
+    target: new CloudSandboxConnectionTarget({
+      environmentId: provisioned.environmentId,
+      label,
+      connectionId,
+    }),
+    profile: new CloudSandboxConnectionProfile({
+      connectionId,
+      environmentId: provisioned.environmentId,
+      label,
+      target: input.target,
+    }),
+  });
+});
+
+export const registerCloudSandboxConnection = Effect.fn(
+  "clientRuntime.connection.onboarding.registerCloudSandboxConnection",
+)(function* (input: CloudSandboxConnectionInput) {
+  const registration = yield* prepareCloudSandboxRegistration(input);
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  yield* registry.register(registration);
+  return registration.target.environmentId;
+});
+
 export const make = Effect.gen(function* () {
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   const presentation = yield* ClientCapabilities.ClientPresentation;
   const httpClient = yield* HttpClient.HttpClient;
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
+  const cloudSandbox = yield* ClientCapabilities.CloudSandboxEnvironmentGateway;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
 
   return ConnectionOnboarding.of({
@@ -260,6 +316,11 @@ export const make = Effect.gen(function* () {
       registerSshConnection(input).pipe(
         Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
         Effect.provideService(ClientCapabilities.SshEnvironmentGateway, ssh),
+      ),
+    registerCloudSandbox: (input) =>
+      registerCloudSandboxConnection(input).pipe(
+        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
+        Effect.provideService(ClientCapabilities.CloudSandboxEnvironmentGateway, cloudSandbox),
       ),
     updateBearer: (input) =>
       updateBearerConnection(input).pipe(

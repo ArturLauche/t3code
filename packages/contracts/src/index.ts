@@ -2,6 +2,8 @@ export * from "./baseSchemas.ts";
 export * from "./background.ts";
 export * from "./auth.ts";
 export * from "./environment.ts";
+export * from "./executionEnvironment.ts";
+export * from "./github.ts";
 export * from "./environmentHttp.ts";
 export * from "./relayClient.ts";
 export * from "./desktopBootstrap.ts";

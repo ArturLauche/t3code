@@ -7,6 +7,7 @@ export {
   type EnvironmentConnectionLease,
 } from "./driver.ts";
 export * from "./errors.ts";
+export * from "./executionEnvironment.ts";
 export * as Connection from "./layer.ts";
 export * from "./model.ts";
 export {
@@ -14,11 +15,14 @@ export {
   ConnectionOnboarding,
   type PairingConnectionInput,
   type SshConnectionInput,
+  type CloudSandboxConnectionInput,
   prepareBearerConnectionUpdate,
   preparePairingRegistration,
   prepareSshRegistration,
+  prepareCloudSandboxRegistration,
   registerPairingConnection,
   registerSshConnection,
+  registerCloudSandboxConnection,
   updateBearerConnection,
 } from "./onboarding.ts";
 export * from "./presentation.ts";

@@ -34,6 +34,7 @@ import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
+import * as DesktopIntegrationStore from "./app/DesktopIntegrationStore.ts";
 import * as DesktopClerk from "./app/DesktopClerk.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
@@ -54,6 +55,8 @@ import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
+import * as DesktopCloudSandboxEnvironment from "./sandbox/DesktopCloudSandboxEnvironment.ts";
+import * as DesktopGitHubIntegration from "./github/DesktopGitHubIntegration.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
@@ -133,6 +136,7 @@ const desktopFoundationLayer = Layer.mergeAll(
   DesktopAppSettings.layer,
   DesktopClientSettings.layer,
   DesktopConnectionCatalogStore.layer.pipe(Layer.provideMerge(DesktopSavedEnvironments.layer)),
+  DesktopIntegrationStore.layer,
   DesktopAssets.layer,
   DesktopObservability.layer,
 ).pipe(Layer.provideMerge(desktopEnvironmentLayer));
@@ -140,6 +144,23 @@ const desktopFoundationLayer = Layer.mergeAll(
 const desktopSshLayer = desktopSshEnvironmentLayer.pipe(
   Layer.provideMerge(DesktopSshPasswordPrompts.layer()),
 );
+
+const desktopCloudSandboxLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const settings = yield* DesktopAppSettings.DesktopAppSettings;
+    return DesktopCloudSandboxEnvironment.layer({
+      resolveCliRunner: settings.get.pipe(
+        Effect.map((currentSettings) => resolveDesktopSshCliRunner(environment, currentSettings)),
+      ),
+    });
+  }),
+);
+
+const desktopIntegrationLayer = Layer.mergeAll(
+  desktopCloudSandboxLayer,
+  DesktopGitHubIntegration.layer,
+).pipe(Layer.provide(desktopSshLayer), Layer.provide(desktopFoundationLayer));
 
 const desktopServerExposureLayer = DesktopServerExposure.layer.pipe(
   Layer.provideMerge(DesktopNetworkInterfaces.layer),
@@ -186,6 +207,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   DesktopLinuxUrlHandler.layer,
   DesktopShellEnvironment.layer,
   desktopSshLayer,
+  desktopIntegrationLayer,
 ).pipe(
   Layer.provideMerge(DesktopUpdates.layer),
   Layer.provideMerge(desktopWslBackendLayer),

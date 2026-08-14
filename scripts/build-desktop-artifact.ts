@@ -1561,6 +1561,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         url: resolveMockUpdateServerUrl(mockUpdateServerPort),
       },
     ];
+  } else {
+    // electron-builder 26 tries repository auto-detection when `publish` is
+    // omitted and can hand a null provider to update metadata generation.
+    // An explicit null is its supported "no update feed" configuration.
+    buildConfig.publish = null;
   }
 
   if (platform === "mac") {

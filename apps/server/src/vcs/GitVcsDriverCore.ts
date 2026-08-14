@@ -37,6 +37,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import * as GitHubCredentialBroker from "../sourceControl/GitHubCredentialBroker.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -704,6 +705,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
+  const githubBroker = yield* Effect.serviceOption(GitHubCredentialBroker.GitHubCredentialBroker);
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
@@ -716,6 +718,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const appendTruncationMarker = input.appendTruncationMarker ?? false;
 
       const runGitCommand = Effect.fn("runGitCommand")(function* () {
+        const githubLease = Option.isSome(githubBroker)
+          ? yield* Effect.acquireRelease(
+              githubBroker.value.gitProcessEnvironment.pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Could not prepare ephemeral GitHub credentials.", {
+                    operation: error.operation,
+                  }).pipe(
+                    Effect.as(Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>()),
+                  ),
+                ),
+              ),
+              (lease) => (Option.isSome(lease) ? lease.value.release : Effect.void),
+            )
+          : Option.none<GitHubCredentialBroker.GitHubGitEnvironmentLease>();
         const trace2Monitor = yield* createTrace2Monitor(commandInput, input.progress).pipe(
           Effect.provideService(Path.Path, path),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -732,11 +748,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           .spawn(
             ChildProcess.make("git", commandInput.args, {
               cwd: commandInput.cwd,
-              env: {
-                ...process.env,
-                ...input.env,
-                ...trace2Monitor.env,
-              },
+              env: Option.isSome(githubLease)
+                ? GitHubCredentialBroker.mergeGitHubGitEnvironment(
+                    { ...process.env, ...input.env, ...trace2Monitor.env },
+                    githubLease.value.environment,
+                  )
+                : { ...process.env, ...input.env, ...trace2Monitor.env },
             }),
           )
           .pipe(

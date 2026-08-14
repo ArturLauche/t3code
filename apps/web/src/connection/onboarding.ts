@@ -3,7 +3,7 @@ import {
   createAtomCommandScheduler,
   createRuntimeCommand,
 } from "@t3tools/client-runtime/state/runtime";
-import type { DesktopSshEnvironmentTarget } from "@t3tools/contracts";
+import type { DesktopCloudSandboxTarget, DesktopSshEnvironmentTarget } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import { connectionAtomRuntime } from "./runtime";
@@ -35,4 +35,17 @@ export const connectSshEnvironment = createRuntimeCommand(connectionAtomRuntime,
   },
   execute: (input: { readonly target: DesktopSshEnvironmentTarget; readonly label?: string }) =>
     ConnectionOnboarding.pipe(Effect.flatMap((onboarding) => onboarding.registerSsh(input))),
+});
+
+export const connectCloudSandbox = createRuntimeCommand(connectionAtomRuntime, {
+  label: "web:connection:connect-cloud-sandbox",
+  scheduler: onboardingScheduler,
+  concurrency: {
+    mode: "serial",
+    key: (input: { readonly target: DesktopCloudSandboxTarget }) => JSON.stringify(input.target),
+  },
+  execute: (input: { readonly target: DesktopCloudSandboxTarget; readonly label?: string }) =>
+    ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) => onboarding.registerCloudSandbox(input)),
+    ),
 });

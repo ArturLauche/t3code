@@ -3,13 +3,15 @@ import {
   type AuthEnvironmentScope,
   type DesktopSshEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
+  type DesktopCloudSandboxBootstrap,
+  type DesktopCloudSandboxTarget,
   EnvironmentId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
 
-import type { ConnectionAttemptError } from "../connection/model.ts";
+import type { ConnectionAttemptError, PreparedConnection } from "../connection/model.ts";
 
 export interface PreparedSshEnvironment {
   readonly bootstrap: DesktopSshEnvironmentBootstrap;
@@ -66,3 +68,38 @@ export class SshEnvironmentGateway extends Context.Service<
     ) => Effect.Effect<void, ConnectionAttemptError>;
   }
 >()("@t3tools/client-runtime/platform/capabilities/SshEnvironmentGateway") {}
+
+export interface PreparedCloudSandboxEnvironment {
+  readonly bootstrap: DesktopCloudSandboxBootstrap;
+  readonly bearerToken: string;
+}
+
+export interface ProvisionedCloudSandboxEnvironment extends PreparedCloudSandboxEnvironment {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+}
+
+export class CloudSandboxEnvironmentGateway extends Context.Service<
+  CloudSandboxEnvironmentGateway,
+  {
+    readonly provision: (
+      target: DesktopCloudSandboxTarget,
+    ) => Effect.Effect<ProvisionedCloudSandboxEnvironment, ConnectionAttemptError>;
+    readonly prepare: (input: {
+      readonly connectionId: string;
+      readonly expectedEnvironmentId: EnvironmentId;
+      readonly target: DesktopCloudSandboxTarget;
+    }) => Effect.Effect<PreparedCloudSandboxEnvironment, ConnectionAttemptError>;
+    readonly disconnect: (
+      target: DesktopCloudSandboxTarget,
+    ) => Effect.Effect<void, ConnectionAttemptError>;
+  }
+>()("@t3tools/client-runtime/platform/capabilities/CloudSandboxEnvironmentGateway") {}
+
+/** Host-owned credential bridge. The renderer never receives the source-control credential. */
+export class SourceControlCredentialGateway extends Context.Service<
+  SourceControlCredentialGateway,
+  {
+    readonly sync: (connection: PreparedConnection) => Effect.Effect<void, ConnectionAttemptError>;
+  }
+>()("@t3tools/client-runtime/platform/capabilities/SourceControlCredentialGateway") {}

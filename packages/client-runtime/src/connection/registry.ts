@@ -19,6 +19,7 @@ import {
   type PlatformConnectionRegistration,
   type PrimaryConnectionRegistration,
   SshConnectionProfile,
+  CloudSandboxConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
@@ -36,6 +37,7 @@ import * as ConnectionDriver from "./driver.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
 
 const isSshConnectionProfile = Schema.is(SshConnectionProfile);
+const isCloudSandboxConnectionProfile = Schema.is(CloudSandboxConnectionProfile);
 
 export class EnvironmentNotRegisteredError extends Schema.TaggedErrorClass<EnvironmentNotRegisteredError>()(
   "EnvironmentNotRegisteredError",
@@ -136,13 +138,16 @@ export const make = Effect.gen(function* () {
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
+  const cloudSandbox = yield* ClientCapabilities.CloudSandboxEnvironmentGateway;
   const persistedTargets = yield* storage.list;
   const initialEntries = new Map(
     yield* Effect.forEach(
       persistedTargets,
       Effect.fn("EnvironmentRegistry.loadCatalogEntry")(function* (target) {
         const profile =
-          target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+          target._tag === "BearerConnectionTarget" ||
+          target._tag === "SshConnectionTarget" ||
+          target._tag === "CloudSandboxConnectionTarget"
             ? yield* profiles.get(target.connectionId)
             : Option.none();
         return [
@@ -552,7 +557,9 @@ export const make = Effect.gen(function* () {
         }
         const target = (yield* getEntry(environmentId)).target;
         const profile =
-          target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+          target._tag === "BearerConnectionTarget" ||
+          target._tag === "SshConnectionTarget" ||
+          target._tag === "CloudSandboxConnectionTarget"
             ? yield* profiles.get(target.connectionId)
             : Option.none();
 
@@ -591,6 +598,21 @@ export const make = Effect.gen(function* () {
           yield* ssh.disconnect(profile.value.target).pipe(
             Effect.tapError((error) =>
               Effect.logWarning("Could not disconnect the managed SSH environment.", {
+                environmentId,
+                error,
+              }),
+            ),
+            Effect.ignore,
+          );
+        }
+        if (
+          target._tag === "CloudSandboxConnectionTarget" &&
+          Option.isSome(profile) &&
+          isCloudSandboxConnectionProfile(profile.value)
+        ) {
+          yield* cloudSandbox.disconnect(profile.value.target).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("Could not disconnect the cloud sandbox environment.", {
                 environmentId,
                 error,
               }),

@@ -7,6 +7,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 ## Table of contents
 
 - [Project and workspace](#project-and-workspace)
+- [Execution environments](#execution-environments)
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
@@ -27,6 +28,24 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 #### Worktree
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
+
+### Execution environments
+
+#### Execution environment
+
+The machine or managed sandbox that owns a T3 server and therefore owns project files, terminals, Git operations, and agent processes. A project is always routed through one execution environment.
+
+#### Local
+
+An execution environment managed directly by the desktop app on the current machine, including the primary local backend and supported local platform backends such as WSL.
+
+#### SSH Remote
+
+An execution environment reached through SSH. The desktop manages the SSH transport while the remote T3 server remains responsible for projects, Git, terminals, and agents on that host.
+
+#### Cloud Sandbox
+
+A provider-managed execution environment such as Daytona, E2B, or Novita. T3 normalizes provider lifecycle operations and connects to a T3 server running inside the sandbox.
 
 ### Thread timeline
 

@@ -85,6 +85,38 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   resolveSshPasswordPrompt: (requestId, password) =>
     ipcRenderer.invoke(IpcChannels.RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL, { requestId, password }),
+  listCloudSandboxProviderConnections: () =>
+    ipcRenderer.invoke(IpcChannels.LIST_CLOUD_SANDBOX_PROVIDER_CONNECTIONS_CHANNEL),
+  saveCloudSandboxProviderConnection: (input) =>
+    ipcRenderer.invoke(IpcChannels.SAVE_CLOUD_SANDBOX_PROVIDER_CONNECTION_CHANNEL, input),
+  validateCloudSandboxProviderConnection: (input) =>
+    ipcRenderer.invoke(IpcChannels.VALIDATE_CLOUD_SANDBOX_PROVIDER_CONNECTION_CHANNEL, input),
+  removeCloudSandboxProviderConnection: (input) =>
+    ipcRenderer.invoke(IpcChannels.REMOVE_CLOUD_SANDBOX_PROVIDER_CONNECTION_CHANNEL, input),
+  listCloudSandboxes: () => ipcRenderer.invoke(IpcChannels.LIST_CLOUD_SANDBOXES_CHANNEL),
+  createCloudSandbox: (input) =>
+    ipcRenderer.invoke(IpcChannels.CREATE_CLOUD_SANDBOX_CHANNEL, input),
+  ensureCloudSandbox: (input) =>
+    ipcRenderer.invoke(IpcChannels.ENSURE_CLOUD_SANDBOX_CHANNEL, input),
+  disconnectCloudSandbox: (target) =>
+    ipcRenderer.invoke(IpcChannels.DISCONNECT_CLOUD_SANDBOX_CHANNEL, target),
+  runCloudSandboxLifecycleAction: (input) =>
+    ipcRenderer.invoke(IpcChannels.CLOUD_SANDBOX_LIFECYCLE_CHANNEL, input),
+  associateCloudSandboxProject: (input) =>
+    ipcRenderer.invoke(IpcChannels.ASSOCIATE_CLOUD_SANDBOX_PROJECT_CHANNEL, input),
+  getGitHubConnectionStatus: () =>
+    ipcRenderer.invoke(IpcChannels.GET_GITHUB_CONNECTION_STATUS_CHANNEL),
+  connectGitHubPersonalAccessToken: (input) =>
+    ipcRenderer.invoke(IpcChannels.CONNECT_GITHUB_PAT_CHANNEL, input),
+  startGitHubDeviceAuthorization: () =>
+    ipcRenderer.invoke(IpcChannels.START_GITHUB_DEVICE_AUTHORIZATION_CHANNEL),
+  pollGitHubDeviceAuthorization: () =>
+    ipcRenderer.invoke(IpcChannels.POLL_GITHUB_DEVICE_AUTHORIZATION_CHANNEL),
+  disconnectGitHub: () => ipcRenderer.invoke(IpcChannels.DISCONNECT_GITHUB_CHANNEL),
+  listGitHubRepositories: (input) =>
+    ipcRenderer.invoke(IpcChannels.LIST_GITHUB_REPOSITORIES_CHANNEL, input),
+  syncGitHubCredential: (input) =>
+    ipcRenderer.invoke(IpcChannels.SYNC_GITHUB_CREDENTIAL_CHANNEL, input),
   getServerExposureState: () => ipcRenderer.invoke(IpcChannels.GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) =>
     ipcRenderer.invoke(IpcChannels.SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),

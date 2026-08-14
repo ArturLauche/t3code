@@ -429,9 +429,6 @@ it.layer(
       fs.makeDirectory(filePath, { recursive: true }),
     );
 
-  const chmod = (filePath: string, mode: number) =>
-    Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) => fs.chmod(filePath, mode));
-
   const pathExists = (filePath: string) =>
     Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) => fs.exists(filePath));
 
@@ -478,19 +475,30 @@ it.layer(
 
   it.effect("preserves non-notFound cwd stat failures", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) === "win32") return;
-
+      const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
+      const statFailure = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "stat",
+        pathOrDescriptor: "blocked-root/cwd",
+        description: "Test PermissionDenied stat failure.",
+      });
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        stat: (filePath) =>
+          String(filePath).endsWith(path.join("blocked-root", "cwd"))
+            ? Effect.fail(statFailure)
+            : fs.stat(filePath),
+      });
 
-      const { manager, baseDir } = yield* createManager();
-      const blockedRoot = path.join(baseDir, "blocked-root");
-      const blockedCwd = path.join(blockedRoot, "cwd");
-      yield* makeDirectory(blockedCwd);
-      yield* chmod(blockedRoot, 0o000);
-
-      const error = yield* Effect.flip(manager.open(openInput({ cwd: blockedCwd }))).pipe(
-        Effect.ensuring(chmod(blockedRoot, 0o755).pipe(Effect.ignore)),
-      );
+      const { error, blockedCwd } = yield* Effect.gen(function* () {
+        const { manager, baseDir } = yield* createManager();
+        const blockedCwd = path.join(baseDir, "blocked-root", "cwd");
+        yield* makeDirectory(blockedCwd);
+        const error = yield* Effect.flip(manager.open(openInput({ cwd: blockedCwd })));
+        return { error, blockedCwd };
+      }).pipe(Effect.provideService(FileSystem.FileSystem, failingFileSystem));
 
       expect(error).toMatchObject({
         _tag: "TerminalCwdStatError",

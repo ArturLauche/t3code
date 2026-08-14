@@ -72,10 +72,14 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Keeping app and server in sync](./docs/user/updating.md)
 - [Source control integrations](./docs/user/source-control.md)
+- [Local, SSH, and cloud execution environments](./docs/user/execution-environments.md)
+- [GitHub connection and repository picker](./docs/user/github-connection.md)
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 - Linux: [run T3 Code as a background service](./docs/user/background-service.md)
 
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
+Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md). Fork
+maintainers can build unsigned desktop installers with the
+[fork-friendly GitHub Actions workflow](./docs/operations/fork-builds.md).
 
 ## If you REALLY want to contribute still.... read this first
 

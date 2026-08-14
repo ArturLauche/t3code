@@ -10,9 +10,9 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   BuildCommandFailedError,
+  createBuildConfig,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
-  createBuildConfig,
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
@@ -153,6 +153,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         channel: "nightly",
       });
     }),
+  );
+
+  it.effect("builds without updater metadata when no fork update feed is configured", () =>
+    createBuildConfig("linux", "AppImage", "1.2.3", false, false, undefined, undefined).pipe(
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+      Effect.tap((config) => Effect.sync(() => assert.strictEqual(config.publish, null))),
+    ),
   );
 
   it("omits bundled workspace packages from staged desktop dependencies", () => {

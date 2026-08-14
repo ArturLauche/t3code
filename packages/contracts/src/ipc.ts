@@ -91,6 +91,24 @@ import { EnvironmentId } from "./baseSchemas.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import type {
+  CloudSandboxAssociationInput,
+  CloudSandboxCreateInput,
+  CloudSandboxEnsureInput,
+  CloudSandboxLifecycleInput,
+  CloudSandboxProviderConnection,
+  CloudSandboxProviderConnectionIdInput,
+  CloudSandboxProviderConnectionInput,
+  CloudSandboxRecord,
+  DesktopCloudSandboxBootstrap,
+} from "./executionEnvironment.ts";
+import type {
+  GitHubConnectionStatus,
+  GitHubDeviceAuthorization,
+  GitHubPersonalAccessTokenInput,
+  GitHubRepositoryListInput,
+  GitHubRepositoryListResult,
+} from "./github.ts";
 import type { ClientSettings } from "./settings.ts";
 import type {
   SourceControlCloneRepositoryInput,
@@ -385,6 +403,11 @@ export const DesktopSshPasswordPromptResolutionInputSchema = Schema.Struct({
   requestId: Schema.String,
   password: Schema.NullOr(Schema.String),
 });
+
+export const DesktopGitHubCredentialSyncInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+});
+export type DesktopGitHubCredentialSyncInput = typeof DesktopGitHubCredentialSyncInputSchema.Type;
 
 export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
   environmentId: EnvironmentId,
@@ -1024,6 +1047,35 @@ export interface DesktopBridge {
   ) => Promise<AuthWebSocketTicketResult>;
   onSshPasswordPrompt: (listener: (request: DesktopSshPasswordPromptRequest) => void) => () => void;
   resolveSshPasswordPrompt: (requestId: string, password: string | null) => Promise<void>;
+  listCloudSandboxProviderConnections: () => Promise<readonly CloudSandboxProviderConnection[]>;
+  saveCloudSandboxProviderConnection: (
+    input: CloudSandboxProviderConnectionInput,
+  ) => Promise<CloudSandboxProviderConnection>;
+  validateCloudSandboxProviderConnection: (
+    input: CloudSandboxProviderConnectionIdInput,
+  ) => Promise<CloudSandboxProviderConnection>;
+  removeCloudSandboxProviderConnection: (
+    input: CloudSandboxProviderConnectionIdInput,
+  ) => Promise<void>;
+  listCloudSandboxes: () => Promise<readonly CloudSandboxRecord[]>;
+  createCloudSandbox: (input: CloudSandboxCreateInput) => Promise<CloudSandboxRecord>;
+  ensureCloudSandbox: (input: CloudSandboxEnsureInput) => Promise<DesktopCloudSandboxBootstrap>;
+  disconnectCloudSandbox: (target: CloudSandboxEnsureInput["target"]) => Promise<void>;
+  runCloudSandboxLifecycleAction: (
+    input: CloudSandboxLifecycleInput,
+  ) => Promise<CloudSandboxRecord | null>;
+  associateCloudSandboxProject: (
+    input: CloudSandboxAssociationInput,
+  ) => Promise<CloudSandboxRecord>;
+  getGitHubConnectionStatus: () => Promise<GitHubConnectionStatus>;
+  connectGitHubPersonalAccessToken: (
+    input: GitHubPersonalAccessTokenInput,
+  ) => Promise<GitHubConnectionStatus>;
+  startGitHubDeviceAuthorization: () => Promise<GitHubDeviceAuthorization>;
+  pollGitHubDeviceAuthorization: () => Promise<GitHubConnectionStatus>;
+  disconnectGitHub: () => Promise<void>;
+  listGitHubRepositories: (input: GitHubRepositoryListInput) => Promise<GitHubRepositoryListResult>;
+  syncGitHubCredential: (input: DesktopGitHubCredentialSyncInput) => Promise<boolean>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
   setTailscaleServeEnabled: (input: {
