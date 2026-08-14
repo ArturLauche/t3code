@@ -11,12 +11,6 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 
 replace_once(
-    "packages/client-runtime/src/connection/onboarding.test.ts",
-    '          connectionId: "sandbox:daytona:work:sandbox-42",',
-    '          connectionId: "sandbox:daytona:daytona%3Awork:sandbox-42",',
-)
-
-replace_once(
     "apps/desktop/src/ipc/methods/sshEnvironment.ts",
     '''    yield* withLoopbackSshApi(
       "register-github-environment",
