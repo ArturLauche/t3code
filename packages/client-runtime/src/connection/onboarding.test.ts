@@ -298,7 +298,7 @@ describe("connection onboarding", () => {
           _tag: "CloudSandboxConnectionTarget",
           environmentId: "environment-cloud",
           label: "Daytona workspace",
-          connectionId: "sandbox:daytona:work:sandbox-42",
+          connectionId: "sandbox:daytona:daytona%3Awork:sandbox-42",
         },
         profile: {
           _tag: "CloudSandboxConnectionProfile",
