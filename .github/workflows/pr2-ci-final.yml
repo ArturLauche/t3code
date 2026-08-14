@@ -70,4 +70,4 @@ jobs:
             push --force-with-lease=refs/heads/agent/execution-environments-github-sandboxes:"$GITHUB_SHA" \
             origin HEAD:agent/execution-environments-github-sandboxes
 
-# trigger: final typecheck corrections
+# trigger: final clean validation
