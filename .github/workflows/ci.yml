@@ -13,8 +13,12 @@ concurrency:
 jobs:
   check:
     name: Check
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    # Fork-friendly: use standard GitHub-hosted runners. Upstream uses
+    # blacksmith-8vcpu-ubuntu-2404; this fork falls back to ubuntu-latest when
+    # Blacksmith is unavailable. Set T3CODE_USE_BLACKSMITH=true (and provision
+    # Blacksmith runners) to restore the upstream runner labels.
+    runs-on: ${{ (vars.T3CODE_USE_BLACKSMITH == 'true') && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -59,8 +63,8 @@ jobs:
 
   test:
     name: Test
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    runs-on: ${{ (vars.T3CODE_USE_BLACKSMITH == 'true') && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -112,8 +116,8 @@ jobs:
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
-    runs-on: blacksmith-6vcpu-macos-26
-    timeout-minutes: 10
+    runs-on: ${{ (vars.T3CODE_USE_BLACKSMITH == 'true') && 'blacksmith-6vcpu-macos-26' || 'macos-latest' }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -140,8 +144,8 @@ jobs:
 
   release_smoke:
     name: Release Smoke
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    runs-on: ${{ (vars.T3CODE_USE_BLACKSMITH == 'true') && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6

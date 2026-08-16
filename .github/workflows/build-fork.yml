@@ -1,0 +1,203 @@
+name: Build Fork
+
+# Fork-friendly build pipeline using standard GitHub-hosted runners.
+# Does NOT require upstream Blacksmith runners, Clerk, Cloudflare, Apple
+# signing, or Azure Trusted Signing configuration. Produces unsigned artifacts
+# when signing secrets are absent, and signed artifacts when they are provided.
+#
+# The desktop updater feed defaults to this fork's own repository
+# (GITHUB_REPOSITORY) via resolveGitHubPublishConfig in
+# scripts/build-desktop-artifact.ts, so installations built from this fork
+# update from this fork's releases rather than upstream T3 Code.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_all_platforms:
+        description: "Build all platforms (otherwise build only the runner's platform)"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "native/**"
+      - "scripts/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - ".github/workflows/build-fork.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-fork-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64 NSIS
+            runner: windows-latest
+            platform: win
+            target: nsis
+            arch: x64
+            rust_target: x86_64-pc-windows-msvc
+            artifact_glob: "*.exe"
+          - label: Linux x64 AppImage
+            runner: ubuntu-latest
+            platform: linux
+            target: AppImage
+            arch: x64
+            rust_target: x86_64-unknown-linux-gnu
+            artifact_glob: "*.AppImage"
+          - label: macOS arm64
+            runner: macos-latest
+            platform: mac
+            target: dmg
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+            artifact_glob: "*.dmg"
+          - label: macOS x64
+            runner: macos-13
+            platform: mac
+            target: dmg
+            arch: x64
+            rust_target: x86_64-apple-darwin
+            artifact_glob: "*.dmg"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+          run-install: false
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Ensure Electron runtime is installed
+        run: pnpm run --filter @t3tools/desktop ensure:electron
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Build desktop pipeline
+        env:
+          # Do not point this fork at upstream Clerk/Cloudflare/relay by default.
+          # Cloud/relay features build disabled for a self-hosted fork; the
+          # desktop app remains fully usable as a local/self-hosted application.
+          T3CODE_CLERK_PUBLISHABLE_KEY: ${{ secrets.T3CODE_CLERK_PUBLISHABLE_KEY }}
+          T3CODE_CLERK_JWT_TEMPLATE: ${{ secrets.T3CODE_CLERK_JWT_TEMPLATE }}
+          T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ secrets.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
+          T3CODE_RELAY_URL: ${{ secrets.T3CODE_RELAY_URL }}
+        run: pnpm run build:desktop
+
+      # The fork updater feed resolves to GITHUB_REPOSITORY (this fork) when
+      # T3CODE_DESKTOP_UPDATE_REPOSITORY is unset — see resolveGitHubPublishConfig.
+      - name: Build desktop artifact
+        env:
+          T3CODE_DESKTOP_PLATFORM: ${{ matrix.platform }}
+          T3CODE_DESKTOP_TARGET: ${{ matrix.target }}
+          T3CODE_DESKTOP_ARCH: ${{ matrix.arch }}
+          T3CODE_DESKTOP_VERSION: ${{ github.ref_name }}
+          T3CODE_DESKTOP_OUTPUT_DIR: release
+          # Signing is opt-in: leave unset to produce unsigned artifacts.
+          T3CODE_DESKTOP_SIGNED: ${{ secrets.FORK_DESKTOP_SIGNED == 'true' && 'true' || '' }}
+          # Apple signing (optional). When absent, the build is unsigned.
+          T3CODE_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          T3CODE_MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows Azure Trusted Signing (optional).
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_TRUSTED_SIGNING_CLIENT_ID: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_ID }}
+          AZURE_TRUSTED_SIGNING_CLIENT_SECRET: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          pnpm run dist:desktop:artifact -- \
+            --platform "${{ matrix.platform }}" \
+            --target "${{ matrix.target }}" \
+            --arch "${{ matrix.arch }}" \
+            --output-dir release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/${{ matrix.artifact_glob }}
+            release/*.blockmap
+            release/*.yml
+            release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Release (tag)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Merge macOS updater manifests
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for x64_manifest in release-assets/*-mac-x64.yml; do
+            arm64_manifest="${x64_manifest%-x64.yml}.yml"
+            if [[ -f "$arm64_manifest" ]]; then
+              node scripts/merge-update-manifests.ts --platform mac "$arm64_manifest" "$x64_manifest" || true
+              rm -f "$x64_manifest" || true
+            fi
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.AppImage
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/*.yml
+          fail_on_unmatched_files: false
+          token: ${{ github.token }}
