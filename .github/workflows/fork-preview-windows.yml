@@ -1,0 +1,128 @@
+name: Fork Windows Preview
+
+# Fork-safe Windows preview on GitHub-hosted runners (no Blacksmith, no secrets).
+# Builds the desktop NSIS installer unsigned with public T3 Connect config
+# from .env.example and publishes it to the rolling `fork-windows-preview`
+# prerelease, plus a run artifact.
+#
+# Triggers:
+#   - push to main (so merging a PR publishes a fresh preview)
+#   - manual workflow_dispatch (pick any branch)
+#
+# Notes:
+#   - Unsigned build (no Azure Trusted Signing secrets in a fork).
+#   - No WSL runtime embedded (that needs the same-arch Linux CLI archive from
+#     release.yml). The Windows preview runs the Windows backend only.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-windows-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows x64 preview
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Spectre-mitigated MSVC libs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
+            Write-Error "Visual Studio Installer failed with exit code $code"
+            exit $code
+          }
+
+      - name: Use public T3 Connect config (no secrets)
+        shell: bash
+        run: cp .env.example .env
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build JS bundle (server + web + Electron main)
+        shell: bash
+        run: pnpm exec vp run build:desktop
+
+      - name: Resolve preview version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(node -p "require('./apps/desktop/package.json').version")"
+          echo "version=${base}-fork.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Package Windows installer (unsigned, no WSL runtime)
+        shell: bash
+        run: node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version "${{ steps.version.outputs.version }}" --verbose
+
+      - name: List release outputs
+        shell: bash
+        run: ls -la release/
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview-x64
+          path: release/*.exe
+          if-no-files-found: error
+
+      - name: Publish to rolling fork-windows-preview release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fork-windows-preview
+          name: Fork Windows preview
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Rolling unsigned Windows x64 preview from fork builds (GitHub-hosted `windows-latest`).
+
+            Version: ${{ steps.version.outputs.version }}
+            Commit: ${{ github.sha }}
+
+            No WSL runtime embedded. Install at your own risk; these are not official signed builds.
+          files: release/*.exe
+          fail_on_unmatched_files: true
+          token: ${{ github.token }}

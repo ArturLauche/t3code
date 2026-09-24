@@ -1,0 +1,82 @@
+name: Fork Docker
+
+# Fork-safe Docker build on GitHub-hosted runners (no Blacksmith, no secrets).
+# Builds the t3 server image from ./Dockerfile and pushes it to GHCR.
+#
+# Triggers:
+#   - push to main
+#   - manual workflow_dispatch
+#
+# Output (example for owner ArturLauche):
+#   ghcr.io/arturlauche/t3code:latest
+#   ghcr.io/arturlauche/t3code:sha-<short>
+#   ghcr.io/arturlauche/t3code:fork-<run_number>
+#
+# Run it:
+#   docker run --rm -p 3773:3773 -v t3-data:/home/node/.t3 ghcr.io/OWNER/t3code:latest
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=fork-${{ github.run_number }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test image (CLI --help)
+        run: |
+          set -euo pipefail
+          IMAGE="$(echo '${{ steps.meta.outputs.tags }}' | head -n 1)"
+          echo "Smoking $IMAGE"
+          docker run --rm "$IMAGE" --help | head -20

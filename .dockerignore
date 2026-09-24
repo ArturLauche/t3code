@@ -1,0 +1,15 @@
+node_modules
+.git
+.repos
+release
+release-cli
+release-assets
+release-publish
+.t3
+*.log
+.DS_Store
+.vite-plus
+apps/*/dist
+apps/*/dist-electron
+apps/*/.vite-plus
+packages/*/dist
