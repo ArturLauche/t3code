@@ -261,6 +261,13 @@ export const CursorIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const FreebuffIcon: Icon = ({ className, ...props }) => (
+  <svg {...props} viewBox="0 0 24 24" fill="none" className={cn("stroke-current", className)}>
+    <path d="M4 5.5h16v13H4z" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="m7 9 3 3-3 3m5 0h5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export const GrokIcon: Icon = ({ className, ...props }) => (
   <svg
     {...props}

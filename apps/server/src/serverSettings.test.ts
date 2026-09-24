@@ -677,6 +677,22 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("does not use Freebuff as an implicit text-generation fallback", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"providers":{"codex":{"enabled":false},"claudeAgent":{"enabled":false},"freebuff":{"enabled":true}},"providerInstances":{"freebuff":{"driver":"freebuff","enabled":true,"config":{}}}}',
+      );
+
+      const settings = yield* serverSettings.getSettings;
+
+      assert.notEqual(settings.textGenerationModelSelection.instanceId, "freebuff");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("keeps unused providers disabled in existing sparse settings files", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;
@@ -1042,6 +1058,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           cursor: {
             enabled: false,
           },
+          freebuff: {
+            enabled: false,
+          },
           grok: {
             enabled: false,
           },
@@ -1301,6 +1320,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const environment = yield* resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: serverConfig.stateDir,
         rawProviderInstanceId: instanceId,
         env: undefined,
       });

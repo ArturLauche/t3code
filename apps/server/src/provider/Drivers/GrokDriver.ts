@@ -10,6 +10,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts";
+import { makeCloudExecutionSpawner } from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { makeGrokTextGeneration } from "../../textGeneration/GrokTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
@@ -59,13 +61,23 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
   metadata: {
     displayName: "Grok",
     supportsMultipleInstances: true,
+    supportsCloudExecution: true,
   },
   configSchema: GrokSettings,
   defaultConfig: (): GrokSettings => decodeGrokSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
+  create: ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    executionTarget,
+    enabled,
+    config,
+  }) =>
     Effect.gen(function* () {
       const crypto = yield* Crypto.Crypto;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const cloudRuntime = yield* CloudRuntimeService;
       const httpClient = yield* HttpClient.HttpClient;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -85,8 +97,21 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
+      const cloudTransport =
+        executionTarget?.enabled === true
+          ? yield* makeCloudExecutionSpawner({
+              cloud: cloudRuntime,
+              localSpawner: spawner,
+              runtimeId: executionTarget.runtimeId,
+              instanceId,
+              environment: processEnv,
+              providerEnvironment: environment,
+              sandboxPrefix: `t3-grok-${instanceId}`,
+            })
+          : undefined;
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
         environment: processEnv,
+        ...(cloudTransport ? { childProcessSpawner: cloudTransport.spawner } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });

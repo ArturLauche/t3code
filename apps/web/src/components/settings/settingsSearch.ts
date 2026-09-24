@@ -534,8 +534,17 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "agents cli codex claude cursor freebuff grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
     ],
+  },
+  {
+    id: "cloud-runtimes",
+    title: "Cloud runtimes",
+    to: "/settings/providers",
+    searchTerms: [
+      "cloud remote execution daytona e2b novita sandbox template region api key credentials",
+    ],
+    providerSettingsOnly: true,
   },
   {
     id: "usage-providers",

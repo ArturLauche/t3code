@@ -55,12 +55,23 @@ export interface PtySpawnInput {
 /**
  * PtyAdapter - Service tag for PTY process integration.
  */
-export class PtyAdapter extends Context.Service<
-  PtyAdapter,
-  {
-    /**
-     * Spawn a PTY process for a terminal session.
-     */
-    readonly spawn: (input: PtySpawnInput) => Effect.Effect<PtyProcess, PtySpawnError>;
-  }
->()("t3/terminal/PtyAdapter") {}
+export interface PtyAdapterService {
+  /**
+   * Spawn a PTY process for a terminal session.
+   */
+  readonly spawn: (input: PtySpawnInput) => Effect.Effect<PtyProcess, PtySpawnError>;
+}
+
+const unavailablePtyAdapter: PtyAdapterService = {
+  spawn: (input) =>
+    Effect.fail(
+      new PtySpawnError({
+        adapter: "unavailable",
+        shell: input.shell,
+      }),
+    ),
+};
+
+export class PtyAdapter extends Context.Reference<PtyAdapterService>("t3/terminal/PtyAdapter", {
+  defaultValue: () => unavailablePtyAdapter,
+}) {}

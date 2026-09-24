@@ -35,6 +35,8 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts";
+import { makeCloudExecutionSpawner } from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import {
@@ -121,12 +123,22 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   metadata: {
     displayName: "Codex",
     supportsMultipleInstances: true,
+    supportsCloudExecution: true,
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
+  create: ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    executionTarget,
+    enabled,
+    config,
+  }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const cloudRuntime = yield* CloudRuntimeService;
       const resetCreditCoordinator = yield* CodexResetCreditCoordinator;
       const fileSystem = yield* FileSystem.FileSystem;
       const pathService = yield* Path.Path;
@@ -161,6 +173,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         binaryPath: expandHomePath(config.binaryPath),
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
+      const cloudTransport =
+        executionTarget?.enabled === true
+          ? yield* makeCloudExecutionSpawner({
+              cloud: cloudRuntime,
+              localSpawner: spawner,
+              runtimeId: executionTarget.runtimeId,
+              instanceId,
+              environment: processEnv,
+              providerEnvironment: environment,
+              sandboxPrefix: `t3-codex-${instanceId}`,
+            })
+          : undefined;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(
           makeCodexMaintenanceResolver(homeLayout.sharedHomePath),
@@ -183,6 +207,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // below.
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
+        ...(cloudTransport ? { childProcessSpawner: cloudTransport.spawner } : {}),
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });

@@ -24,6 +24,8 @@ import {
   type SettingSource,
   type SDKUserMessage,
   type ModelUsage,
+  type SpawnOptions,
+  type SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
@@ -466,6 +468,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
 export interface ClaudeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess;
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
@@ -2102,7 +2105,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }) =>
       query({
         prompt: input.prompt,
-        options: input.options,
+        options: {
+          ...input.options,
+          ...(options?.spawnClaudeCodeProcess
+            ? { spawnClaudeCodeProcess: options.spawnClaudeCodeProcess }
+            : {}),
+        },
       }) as ClaudeQueryRuntime);
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();

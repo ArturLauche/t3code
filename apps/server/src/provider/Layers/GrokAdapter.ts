@@ -107,6 +107,7 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
 
 export interface GrokAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
+  readonly childProcessSpawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly instanceId?: ProviderInstanceId;
@@ -348,7 +349,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("grok");
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const childProcessSpawner =
+      options?.childProcessSpawner ?? (yield* ChildProcessSpawner.ChildProcessSpawner);
     const serverConfig = yield* Effect.service(ServerConfig);
     const crypto = yield* Crypto.Crypto;
     const nativeEventLogger =

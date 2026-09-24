@@ -1083,6 +1083,46 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    cloudRuntimeList: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:list",
+      tag: WS_METHODS.cloudRuntimeList,
+    }),
+    cloudRuntimeSetCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:set-credential",
+      tag: WS_METHODS.cloudRuntimeSetCredential,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.runtimeId]),
+      },
+    }),
+    cloudRuntimeClearCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:clear-credential",
+      tag: WS_METHODS.cloudRuntimeClearCredential,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.runtimeId]),
+      },
+    }),
+    cloudRuntimeTest: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:test",
+      tag: WS_METHODS.cloudRuntimeTest,
+    }),
+    cloudRuntimeCreateSandbox: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:create-sandbox",
+      tag: WS_METHODS.cloudRuntimeCreateSandbox,
+    }),
+    cloudRuntimeListSandboxes: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:list-sandboxes",
+      tag: WS_METHODS.cloudRuntimeListSandboxes,
+    }),
+    cloudRuntimeSandboxAction: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:sandbox-action",
+      tag: WS_METHODS.cloudRuntimeSandboxAction,
+    }),
+    cloudRuntimeExecute: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-runtime:execute",
+      tag: WS_METHODS.cloudRuntimeExecute,
+    }),
     updateServer,
     upsertKeybinding: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:upsert-keybinding",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { CloudRuntimeConfig, CloudRuntimeId } from "./cloudRuntime.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
@@ -19,6 +20,8 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+const decodeCloudRuntimeConfig = Schema.decodeUnknownSync(CloudRuntimeConfig);
+const decodeCloudRuntimeId = Schema.decodeUnknownSync(CloudRuntimeId);
 
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
@@ -991,4 +994,47 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
     decodeDeviceHostSettings({ deviceHosts: [{ ...host, target: "-oProxyCommand=bad" }] }),
   ).toThrow();
   expect(() => decodeDeviceHostSettings({ deviceHosts: [{ ...host, port: 0 }] })).toThrow();
+});
+
+describe("CloudRuntimeConfig endpoints", () => {
+  it("accepts vendor domains and HTTPS API endpoints", () => {
+    expect(
+      decodeCloudRuntimeConfig({
+        kind: "e2b",
+        domain: "api.e2b.dev",
+      }).domain,
+    ).toBe("api.e2b.dev");
+    expect(
+      decodeCloudRuntimeConfig({
+        kind: "daytona",
+        apiUrl: "https://daytona.example/api",
+      }).apiUrl,
+    ).toBe("https://daytona.example/api");
+  });
+
+  it("rejects the reserved local execution target", () => {
+    expect(() => decodeCloudRuntimeId("local")).toThrow();
+    expect(CloudRuntimeId.make("primary")).toBe("primary");
+    expect(() =>
+      decodeServerSettings({ cloudRuntimeInstances: { local: { kind: "e2b" } } }),
+    ).toThrow();
+  });
+
+  it("rejects URL credentials, query tokens, and non-HTTPS API endpoints", () => {
+    expect(() =>
+      decodeCloudRuntimeConfig({ kind: "daytona", apiUrl: "https://user:token@daytona.example" }),
+    ).toThrow();
+    expect(() =>
+      decodeCloudRuntimeConfig({
+        kind: "daytona",
+        apiUrl: "https://daytona.example/api?token=secret",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCloudRuntimeConfig({ kind: "daytona", apiUrl: "http://daytona.example" }),
+    ).toThrow();
+    expect(() =>
+      decodeCloudRuntimeConfig({ kind: "e2b", domain: "https://api.e2b.dev" }),
+    ).toThrow();
+  });
 });

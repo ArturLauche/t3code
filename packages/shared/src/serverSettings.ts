@@ -279,6 +279,7 @@ export function applyServerSettingsPatch(
     usagePriceOverrides: usagePriceOverridesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
+    cloudRuntimeInstances: cloudRuntimeInstancesPatch,
     // Already translated into `projectSettingsOverrides` above; the legacy
     // maps are derived views and must never be merged directly.
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
@@ -359,6 +360,9 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
+      : {}),
+    ...(cloudRuntimeInstancesPatch !== undefined
+      ? { cloudRuntimeInstances: cloudRuntimeInstancesPatch }
       : {}),
     ...(projectSettingsOverridesPatch !== undefined
       ? {

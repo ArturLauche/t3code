@@ -23,6 +23,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts";
+import { makeCloudExecutionSpawner } from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
@@ -96,13 +98,23 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
   metadata: {
     displayName: "Cursor",
     supportsMultipleInstances: true,
+    supportsCloudExecution: true,
   },
   configSchema: CursorSettings,
   defaultConfig: (): CursorSettings => decodeCursorSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
+  create: ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    executionTarget,
+    enabled,
+    config,
+  }) =>
     Effect.gen(function* () {
       const crypto = yield* Crypto.Crypto;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const cloudRuntime = yield* CloudRuntimeService;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
@@ -121,6 +133,18 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
+      const cloudTransport =
+        executionTarget?.enabled === true
+          ? yield* makeCloudExecutionSpawner({
+              cloud: cloudRuntime,
+              localSpawner: spawner,
+              runtimeId: executionTarget.runtimeId,
+              instanceId,
+              environment: processEnv,
+              providerEnvironment: environment,
+              sandboxPrefix: `t3-cursor-${instanceId}`,
+            })
+          : undefined;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -199,6 +223,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         yield* makeCursorCommandCatalog(managedSnapshot);
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
+        ...(cloudTransport ? { childProcessSpawner: cloudTransport.spawner } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
         onAvailableCommands: (commands, cwd) =>

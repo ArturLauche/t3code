@@ -11,9 +11,8 @@
  * @module ServerSettings
  */
 import {
-  DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  DEFAULT_MODEL_BY_PROVIDER,
+  type CloudRuntimeId,
   DEFAULT_SERVER_SETTINGS,
   ModelSelection,
   ProjectScript,
@@ -57,6 +56,7 @@ import {
   isModelSelectionProviderEnabled,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import { cloudRuntimeCredentialName } from "./cloud/runtime/credentialName.ts";
 
 export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
@@ -206,6 +206,9 @@ export class ServerSettingsService extends Context.Service<
       patch: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /** Run an effect while holding the settings write lock when supported. */
+    readonly withWriteLock?: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+
     /** Stream of settings change events. */
     readonly streamChanges: Stream.Stream<ServerSettings>;
 
@@ -248,6 +251,7 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
           Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
           Effect.map(resolveTextGenerationProvider),
         ),
+      withWriteLock: (effect) => effect,
       streamChanges: Stream.empty,
       subscribeChanges: Effect.succeed(Stream.empty),
     } satisfies ServerSettingsService["Service"];
@@ -262,6 +266,7 @@ const PersistedOptionalProviderSettings = Schema.Struct({
   providers: Schema.optionalKey(
     Schema.Struct({
       cursor: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+      freebuff: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
       grok: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
       opencode: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
     }),
@@ -290,6 +295,7 @@ function restoreUsedProviders(
       instanceId,
       instance.enabled === undefined &&
       (instance.driver === "cursor" ||
+        instance.driver === "freebuff" ||
         instance.driver === "grok" ||
         instance.driver === "opencode") &&
       usedProviderInstances.has(instanceId)
@@ -305,6 +311,10 @@ function restoreUsedProviders(
       cursor: {
         ...settings.providers.cursor,
         enabled: persisted.providers?.cursor?.enabled ?? usedProviders.has("cursor"),
+      },
+      freebuff: {
+        ...settings.providers.freebuff,
+        enabled: persisted.providers?.freebuff?.enabled ?? usedProviders.has("freebuff"),
       },
       grok: {
         ...settings.providers.grok,
@@ -338,14 +348,17 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
     return settings;
   }
 
+  const model = DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback];
+  // Some providers (for example Freebuff) expose only a conversational
+  // session and explicitly do not implement text generation. Do not turn
+  // their opaque session model into a text-generation fallback.
+  if (!model) return settings;
+
   return {
     ...settings,
     textGenerationModelSelection: {
       instanceId: ProviderInstanceId.make(fallback),
-      model:
-        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_TEXT_GENERATION_MODEL,
+      model,
     } satisfies ModelSelection,
   };
 }
@@ -366,6 +379,7 @@ const PERSISTED_SERVER_SETTINGS_DEFAULTS = {
   providers: {
     ...DEFAULT_SERVER_SETTINGS.providers,
     cursor: { ...DEFAULT_SERVER_SETTINGS.providers.cursor, enabled: undefined },
+    freebuff: { ...DEFAULT_SERVER_SETTINGS.providers.freebuff, enabled: undefined },
     grok: { ...DEFAULT_SERVER_SETTINGS.providers.grok, enabled: undefined },
     opencode: { ...DEFAULT_SERVER_SETTINGS.providers.opencode, enabled: undefined },
   },
@@ -503,6 +517,7 @@ const make = Effect.gen(function* () {
   const changesPubSub = yield* PubSub.unbounded<ServerSettings>();
   const startedRef = yield* Ref.make(false);
   const startedDeferred = yield* Deferred.make<void, ServerSettingsError>();
+  const settingsFileTrustedRef = yield* Ref.make(true);
   const watcherScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(watcherScope, Exit.void));
 
@@ -583,6 +598,7 @@ const make = Effect.gen(function* () {
         settings = decoded.value;
       }
     }
+    yield* Ref.set(settingsFileTrustedRef, settingsFileTrusted);
 
     const providerHistory = yield* sql<{
       readonly providerName: string;
@@ -592,13 +608,13 @@ const make = Effect.gen(function* () {
         provider_name AS "providerName",
         provider_instance_id AS "providerInstanceId"
       FROM projection_thread_sessions
-      WHERE provider_name IN ('cursor', 'grok', 'opencode')
+      WHERE provider_name IN ('cursor', 'freebuff', 'grok', 'opencode')
       UNION
       SELECT DISTINCT
         provider_name AS "providerName",
         provider_instance_id AS "providerInstanceId"
       FROM provider_session_runtime
-      WHERE provider_name IN ('cursor', 'grok', 'opencode')
+      WHERE provider_name IN ('cursor', 'freebuff', 'grok', 'opencode')
     `.pipe(
       Effect.mapError(
         (cause) =>
@@ -854,6 +870,18 @@ const make = Effect.gen(function* () {
         });
       }
 
+      // Cloud credentials live outside settings.json. Remove them in the
+      // same locked update transaction when a runtime is deleted, otherwise
+      // re-adding the same id would silently revive an old API key.
+      for (const runtimeId of Object.keys(current.cloudRuntimeInstances)) {
+        if (runtimeId in next.cloudRuntimeInstances) continue;
+        changes.push({
+          kind: "remove",
+          secretName: cloudRuntimeCredentialName(runtimeId as CloudRuntimeId),
+          operation: "remove-stale-secret",
+        });
+      }
+
       return {
         settings: {
           ...next,
@@ -975,10 +1003,34 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const removeStaleCloudCredentials = (
+    previous: ServerSettings,
+    next: ServerSettings,
+  ): Effect.Effect<void> =>
+    Effect.forEach(
+      Object.keys(previous.cloudRuntimeInstances).filter(
+        (runtimeId) => !(runtimeId in next.cloudRuntimeInstances),
+      ),
+      (runtimeId) =>
+        secretStore.remove(cloudRuntimeCredentialName(runtimeId as CloudRuntimeId)).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("failed to remove stale cloud credential", {
+              runtimeId,
+              cause,
+            }),
+          ),
+        ),
+      { discard: true },
+    );
+
   const revalidateAndEmit = writeSemaphore.withPermits(1)(
     Effect.gen(function* () {
+      const previous = yield* getSettingsFromCache;
       yield* Cache.invalidate(settingsCache, cacheKey);
       const settings = yield* getSettingsFromCache;
+      if (yield* Ref.get(settingsFileTrustedRef)) {
+        yield* removeStaleCloudCredentials(previous, settings);
+      }
       yield* emitChange(settings);
     }),
   );
@@ -1051,6 +1103,7 @@ const make = Effect.gen(function* () {
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings,
+    withWriteLock: (effect) => writeSemaphore.withPermits(1)(effect),
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));
     },

@@ -99,6 +99,7 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
 
 export interface CursorAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
+  readonly childProcessSpawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   /**
@@ -331,7 +332,8 @@ export function makeCursorAdapter(
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("cursor");
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const childProcessSpawner =
+      options?.childProcessSpawner ?? (yield* ChildProcessSpawner.ChildProcessSpawner);
     const serverConfig = yield* Effect.service(ServerConfig);
     const crypto = yield* Crypto.Crypto;
     const nativeEventLogger =

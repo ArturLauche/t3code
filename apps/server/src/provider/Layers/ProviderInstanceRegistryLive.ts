@@ -165,6 +165,21 @@ const buildEntry = <R>(input: {
     }
 
     const typedConfig = decodeResult.success;
+    if (
+      entry.executionTarget?.enabled === true &&
+      driver.metadata.supportsCloudExecution !== true
+    ) {
+      return {
+        kind: "unavailable" as const,
+        snapshot: yield* buildUnavailableProviderSnapshot({
+          driverKind: entry.driver,
+          instanceId,
+          displayName: entry.displayName,
+          accentColor: entry.accentColor,
+          reason: `Driver '${entry.driver}' does not support cloud execution.`,
+        }),
+      };
+    }
     const childScope = yield* Scope.make();
     // Attach the child scope to the registry's parent scope: if the
     // registry scope closes, each surviving instance's child scope is
@@ -179,6 +194,7 @@ const buildEntry = <R>(input: {
         displayName: entry.displayName,
         accentColor: entry.accentColor,
         environment: entry.environment ?? [],
+        ...(entry.executionTarget ? { executionTarget: entry.executionTarget } : {}),
         enabled: resolveEntryEnabled(entry, typedConfig),
         config: typedConfig,
       })

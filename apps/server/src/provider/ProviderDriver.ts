@@ -23,6 +23,7 @@
  */
 import type {
   ProviderConsumeResetCreditOutcome,
+  ProviderExecutionTarget,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -53,6 +54,8 @@ export interface ProviderDriverMetadata {
    * rejects multi-instance configurations with a clear error.
    */
   readonly supportsMultipleInstances?: boolean;
+  /** Whether this driver's process protocol can run in a cloud sandbox. */
+  readonly supportsCloudExecution?: boolean;
 }
 
 /**
@@ -116,6 +119,7 @@ export interface ProviderDriverCreateInput<Config> {
   readonly displayName: string | undefined;
   readonly accentColor?: string | undefined;
   readonly environment: ProviderInstanceEnvironment;
+  readonly executionTarget?: ProviderExecutionTarget;
   readonly enabled: boolean;
   readonly config: Config;
 }

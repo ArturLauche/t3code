@@ -117,6 +117,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
+import * as CloudRuntimeService from "./cloud/runtime/CloudRuntimeService.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -670,6 +671,7 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
       const relayClient = yield* RelayClient.RelayClient;
+      const cloudRuntimes = yield* CloudRuntimeService.CloudRuntimeService;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -2750,6 +2752,50 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "cloud" },
           ),
+        [WS_METHODS.cloudRuntimeList]: (_input) =>
+          observeRpcEffect(WS_METHODS.cloudRuntimeList, cloudRuntimes.list(), {
+            "rpc.aggregate": "cloud-runtime",
+          }),
+        [WS_METHODS.cloudRuntimeSetCredential]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudRuntimeSetCredential,
+            cloudRuntimes.setCredential(input),
+            { "rpc.aggregate": "cloud-runtime", runtimeId: input.runtimeId },
+          ),
+        [WS_METHODS.cloudRuntimeClearCredential]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudRuntimeClearCredential,
+            cloudRuntimes.clearCredential(input.runtimeId),
+            { "rpc.aggregate": "cloud-runtime", runtimeId: input.runtimeId },
+          ),
+        [WS_METHODS.cloudRuntimeTest]: (input) =>
+          observeRpcEffect(WS_METHODS.cloudRuntimeTest, cloudRuntimes.test(input), {
+            "rpc.aggregate": "cloud-runtime",
+            runtimeId: input.runtimeId,
+          }),
+        [WS_METHODS.cloudRuntimeCreateSandbox]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudRuntimeCreateSandbox,
+            cloudRuntimes.createSandbox(input),
+            { "rpc.aggregate": "cloud-runtime", runtimeId: input.runtimeId },
+          ),
+        [WS_METHODS.cloudRuntimeListSandboxes]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudRuntimeListSandboxes,
+            cloudRuntimes.listSandboxes(input),
+            { "rpc.aggregate": "cloud-runtime", runtimeId: input.runtimeId },
+          ),
+        [WS_METHODS.cloudRuntimeSandboxAction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudRuntimeSandboxAction,
+            cloudRuntimes.sandboxAction(input),
+            { "rpc.aggregate": "cloud-runtime", runtimeId: input.runtimeId },
+          ),
+        [WS_METHODS.cloudRuntimeExecute]: (input) =>
+          observeRpcEffect(WS_METHODS.cloudRuntimeExecute, cloudRuntimes.execute(input), {
+            "rpc.aggregate": "cloud-runtime",
+            runtimeId: input.runtimeId,
+          }),
         [WS_METHODS.pullRequestsList]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsList, pullRequests.list(input), {
             "rpc.aggregate": "pull-requests",
