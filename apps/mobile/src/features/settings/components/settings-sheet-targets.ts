@@ -10,6 +10,7 @@ export type SettingsSheetTarget =
   | "SettingsEnvironmentNewThreads"
   | "SettingsEnvironmentSourceControl"
   | "SettingsEnvironmentAgentBehavior"
+  | "SettingsEnvironmentCloudRuntimes"
   | "SettingsEnvironmentMaintenance"
   | "SettingsKeyboard"
   | "SettingsProjectGrouping"

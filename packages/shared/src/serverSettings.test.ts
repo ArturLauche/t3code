@@ -1,4 +1,5 @@
 import {
+  CloudRuntimeId,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   ProviderDriverKind,
@@ -24,6 +25,39 @@ import {
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
 
 describe("serverSettings helpers", () => {
+  it("preserves cloud routing when an older client replaces provider instances", () => {
+    const instanceId = ProviderInstanceId.make("cloud-instance");
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [instanceId]: {
+          driver: ProviderDriverKind.make("codex"),
+          executionTarget: { runtimeId: CloudRuntimeId.make("primary"), enabled: true },
+          config: {},
+        },
+      },
+    } as typeof DEFAULT_SERVER_SETTINGS;
+    const preserved = applyServerSettingsPatch(current, {
+      providerInstances: {
+        [instanceId]: { driver: ProviderDriverKind.make("codex"), config: {} },
+      },
+    });
+    expect(preserved.providerInstances[instanceId]?.executionTarget).toEqual({
+      runtimeId: "primary",
+      enabled: true,
+    });
+    const cleared = applyServerSettingsPatch(preserved, {
+      providerInstances: {
+        [instanceId]: {
+          driver: ProviderDriverKind.make("codex"),
+          executionTarget: null,
+          config: {},
+        },
+      },
+    });
+    expect(cleared.providerInstances[instanceId]?.executionTarget).toBeUndefined();
+  });
+
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },
@@ -41,6 +75,28 @@ describe("serverSettings helpers", () => {
       logsAfterDays: 30,
     });
   });
+  it("merges cloud runtime patches per entry", () => {
+    const primaryId = CloudRuntimeId.make("primary");
+    const secondaryId = CloudRuntimeId.make("secondary");
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      cloudRuntimeInstances: {
+        [primaryId]: { kind: "e2b" as const, enabled: true, setupCommands: [] },
+      },
+    } as typeof DEFAULT_SERVER_SETTINGS;
+    const added = applyServerSettingsPatch(current, {
+      cloudRuntimeInstances: {
+        [secondaryId]: { kind: "daytona" as const, enabled: true, setupCommands: [] },
+      },
+    });
+    expect(Object.keys(added.cloudRuntimeInstances).sort()).toEqual(["primary", "secondary"]);
+    const removed = applyServerSettingsPatch(added, {
+      cloudRuntimeInstances: { [primaryId]: null },
+    });
+    expect(removed.cloudRuntimeInstances[primaryId]).toBeUndefined();
+    expect(removed.cloudRuntimeInstances[secondaryId]).toBeDefined();
+  });
+
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
     const host = { id: "mini", label: "Mac mini", target: "mini" };
     const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { deviceHosts: [host] });

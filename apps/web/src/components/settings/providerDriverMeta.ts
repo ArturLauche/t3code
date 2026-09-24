@@ -3,6 +3,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  FreebuffSettings,
   GrokSettings,
   OpenCodeSettings,
   ProviderDriverKind,
@@ -12,6 +13,7 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  FreebuffIcon,
   GrokIcon,
   type Icon,
   OpenAI,
@@ -41,6 +43,8 @@ export interface ProviderClientDefinition {
    * built-in default or custom — advertises the same marker.
    */
   readonly badgeLabel?: string;
+  /** Whether the driver can route its process protocol through a cloud sandbox. */
+  readonly supportsCloudExecution?: boolean;
 }
 
 const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
@@ -49,12 +53,14 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     label: "Codex",
     icon: OpenAI,
     settingsSchema: CodexSettings,
+    supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("claudeAgent"),
     label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
+    supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("cursor"),
@@ -62,6 +68,15 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     icon: CursorIcon,
     badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
+    supportsCloudExecution: true,
+  },
+  {
+    value: ProviderDriverKind.make("freebuff"),
+    label: "Freebuff",
+    icon: FreebuffIcon,
+    badgeLabel: "Experimental",
+    settingsSchema: FreebuffSettings,
+    supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("grok"),
@@ -69,18 +84,21 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     icon: GrokIcon,
     badgeLabel: "Early Access",
     settingsSchema: GrokSettings,
+    supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
     icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
+    supportsCloudExecution: false,
   },
   {
     value: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
     icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+    supportsCloudExecution: false,
   },
 ];
 

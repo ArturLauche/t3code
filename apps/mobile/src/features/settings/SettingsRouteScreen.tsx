@@ -187,6 +187,12 @@ function SettingsIndexSections() {
           disabled={noServerTargets}
         />
         <SettingsRow
+          icon="cloud"
+          label="Cloud runtimes"
+          target="SettingsEnvironmentCloudRuntimes"
+          disabled={noServerTargets}
+        />
+        <SettingsRow
           icon="arrow.clockwise"
           label="Maintenance"
           target="SettingsEnvironmentMaintenance"

@@ -37,6 +37,7 @@ import {
   type TerminalWriteInput,
   ClaudeSettings,
   CodexSettings,
+  FreebuffSettings,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
@@ -62,6 +63,7 @@ import * as ServerConfig from "../config.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
+import { resolveFreebuffConfigDir } from "../provider/Drivers/FreebuffConfig.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -105,6 +107,7 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const MAX_TERMINAL_LABEL_LENGTH = 128;
 const decodeClaudeSettings = Schema.decodeUnknownOption(ClaudeSettings);
 const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
+const decodeFreebuffSettings = Schema.decodeUnknownOption(FreebuffSettings);
 
 class TerminalSubprocessCheckError extends Schema.TaggedError<TerminalSubprocessCheckError>()(
   "TerminalSubprocessCheckError",
@@ -1316,7 +1319,7 @@ interface TerminalManagerOptions {
   logsDir: string;
   historyLineLimit?: number;
   historyByteLimit?: number;
-  ptyAdapter: PtyAdapter.PtyAdapter["Service"];
+  ptyAdapter: PtyAdapter.PtyAdapterService;
   shellResolver?: () => string;
   env?: NodeJS.ProcessEnv;
   subprocessInspector?: TerminalSubprocessInspector;
@@ -1350,6 +1353,7 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 )(function* (input: {
   readonly serverSettings: ServerSettings.ServerSettingsService["Service"];
   readonly path: Path.Path;
+  readonly stateDir: string;
   readonly rawProviderInstanceId: string;
   readonly env: Record<string, string> | undefined;
 }) {
@@ -1379,6 +1383,16 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
         Effect.provideService(Path.Path, input.path),
       );
     }
+  } else if (instance.driver === "freebuff") {
+    const config = decodeFreebuffSettings(instance.config ?? {});
+    if (Option.isSome(config)) {
+      const configDir = yield* resolveFreebuffConfigDir({
+        settings: config.value,
+        instanceId: providerInstanceId,
+        stateDir: input.stateDir,
+      }).pipe(Effect.provideService(Path.Path, input.path));
+      resolved = { ...resolved, FREEBUFF_CONFIG_DIR: configDir };
+    }
   }
 
   return Object.fromEntries(
@@ -1388,8 +1402,8 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("TerminalManager.make")(function* () {
-  const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
-  const ptyAdapter = yield* PtyAdapter.PtyAdapter;
+  const { stateDir, terminalLogsDir } = yield* ServerConfig.ServerConfig;
+  const ptyAdapter: PtyAdapter.PtyAdapterService = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -1400,6 +1414,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     resolveProviderInstanceTerminalEnvironment({
       serverSettings,
       path,
+      stateDir,
       rawProviderInstanceId,
       env,
     }),

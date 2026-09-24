@@ -3,6 +3,18 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
+  CloudRuntimeCredentialInput,
+  CloudRuntimeError,
+  CloudRuntimeExecuteInput,
+  CloudRuntimeExecuteResult,
+  CloudRuntimeListResult,
+  CloudRuntimeSandboxActionInput,
+  CloudRuntimeSandboxCreateInput,
+  CloudRuntimeSandboxListInput,
+  CloudRuntimeSandboxListResult,
+  CloudRuntimeTestInput,
+} from "./cloudRuntime.ts";
+import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
   ProviderAuthState,
@@ -389,6 +401,14 @@ export const WS_METHODS = {
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
+  cloudRuntimeList: "cloud.runtime.list",
+  cloudRuntimeSetCredential: "cloud.runtime.setCredential",
+  cloudRuntimeClearCredential: "cloud.runtime.clearCredential",
+  cloudRuntimeTest: "cloud.runtime.test",
+  cloudRuntimeCreateSandbox: "cloud.runtime.createSandbox",
+  cloudRuntimeListSandboxes: "cloud.runtime.listSandboxes",
+  cloudRuntimeSandboxAction: "cloud.runtime.sandboxAction",
+  cloudRuntimeExecute: "cloud.runtime.execute",
 
   // Pull request methods
   pullRequestsList: "pullRequests.list",
@@ -672,6 +692,54 @@ const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient
   success: RelayClientInstallProgressEventSchema,
   error: Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+const WsCloudRuntimeListRpc = Rpc.make(WS_METHODS.cloudRuntimeList, {
+  payload: Schema.Struct({}),
+  success: CloudRuntimeListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeSetCredentialRpc = Rpc.make(WS_METHODS.cloudRuntimeSetCredential, {
+  payload: CloudRuntimeCredentialInput,
+  success: CloudRuntimeListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeClearCredentialRpc = Rpc.make(WS_METHODS.cloudRuntimeClearCredential, {
+  payload: CloudRuntimeTestInput,
+  success: CloudRuntimeListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeTestRpc = Rpc.make(WS_METHODS.cloudRuntimeTest, {
+  payload: CloudRuntimeTestInput,
+  success: CloudRuntimeListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeCreateSandboxRpc = Rpc.make(WS_METHODS.cloudRuntimeCreateSandbox, {
+  payload: CloudRuntimeSandboxCreateInput,
+  success: CloudRuntimeSandboxListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeListSandboxesRpc = Rpc.make(WS_METHODS.cloudRuntimeListSandboxes, {
+  payload: CloudRuntimeSandboxListInput,
+  success: CloudRuntimeSandboxListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeSandboxActionRpc = Rpc.make(WS_METHODS.cloudRuntimeSandboxAction, {
+  payload: CloudRuntimeSandboxActionInput,
+  success: CloudRuntimeSandboxListResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsCloudRuntimeExecuteRpc = Rpc.make(WS_METHODS.cloudRuntimeExecute, {
+  payload: CloudRuntimeExecuteInput,
+  success: CloudRuntimeExecuteResult,
+  error: Schema.Union([CloudRuntimeError, EnvironmentAuthorizationError]),
 });
 
 const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
@@ -1429,6 +1497,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsCloudRuntimeListRpc,
+  WsCloudRuntimeSetCredentialRpc,
+  WsCloudRuntimeClearCredentialRpc,
+  WsCloudRuntimeTestRpc,
+  WsCloudRuntimeCreateSandboxRpc,
+  WsCloudRuntimeListSandboxesRpc,
+  WsCloudRuntimeSandboxActionRpc,
+  WsCloudRuntimeExecuteRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,

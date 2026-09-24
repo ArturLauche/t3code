@@ -7,6 +7,8 @@ import {
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
   type ProviderDriverKind,
+  ProviderInstanceConfig,
+  ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
@@ -262,6 +264,44 @@ function translateLegacyProjectOverridePatch(
   } as ServerSettingsPatch;
 }
 
+const mergeProviderInstancePatches = (
+  current: ServerSettings["providerInstances"],
+  patch: NonNullable<ServerSettingsPatch["providerInstances"]>,
+): ServerSettings["providerInstances"] => {
+  const entries = Object.entries(patch).map(([rawInstanceId, incoming]) => {
+    const instanceId = ProviderInstanceId.make(rawInstanceId);
+    const existing = current[instanceId];
+    if (incoming.executionTarget === undefined && existing?.executionTarget !== undefined) {
+      return [
+        instanceId,
+        {
+          ...incoming,
+          executionTarget: existing.executionTarget,
+        } satisfies ProviderInstanceConfig,
+      ] as const;
+    }
+    if (incoming.executionTarget === null) {
+      const { executionTarget: _executionTarget, ...withoutTarget } = incoming;
+      return [instanceId, withoutTarget satisfies ProviderInstanceConfig] as const;
+    }
+    return [instanceId, incoming as unknown as ProviderInstanceConfig] as const;
+  });
+  return Object.fromEntries(entries) as ServerSettings["providerInstances"];
+};
+
+const mergeCloudRuntimePatches = (
+  current: ServerSettings["cloudRuntimeInstances"],
+  patch: NonNullable<ServerSettingsPatch["cloudRuntimeInstances"]>,
+): ServerSettings["cloudRuntimeInstances"] => {
+  const next = { ...current };
+  for (const [runtimeId, config] of Object.entries(patch)) {
+    const id = runtimeId as keyof typeof next;
+    if (config === null) delete next[id];
+    else next[id] = config;
+  }
+  return next;
+};
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
@@ -279,6 +319,8 @@ export function applyServerSettingsPatch(
     usagePriceOverrides: usagePriceOverridesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
+    providerInstances: providerInstancesPatch,
+    cloudRuntimeInstances: cloudRuntimeInstancesPatch,
     // Already translated into `projectSettingsOverrides` above; the legacy
     // maps are derived views and must never be merged directly.
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
@@ -357,8 +399,21 @@ export function applyServerSettingsPatch(
     ...(backgroundActivity === undefined && backgroundActivityPatch !== undefined
       ? { backgroundActivity: backgroundActivityPatch }
       : {}),
-    ...(patch.providerInstances !== undefined
-      ? { providerInstances: patch.providerInstances }
+    ...(providerInstancesPatch !== undefined
+      ? {
+          providerInstances: mergeProviderInstancePatches(
+            current.providerInstances,
+            providerInstancesPatch,
+          ),
+        }
+      : {}),
+    ...(cloudRuntimeInstancesPatch !== undefined
+      ? {
+          cloudRuntimeInstances: mergeCloudRuntimePatches(
+            current.cloudRuntimeInstances,
+            cloudRuntimeInstancesPatch,
+          ),
+        }
       : {}),
     ...(projectSettingsOverridesPatch !== undefined
       ? {

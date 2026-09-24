@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CloudRuntimeId,
   DEFAULT_SERVER_SETTINGS,
   ModelSelection,
   ProjectId,
@@ -23,6 +24,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import { cloudRuntimeCredentialName } from "./cloud/runtime/credentialName.ts";
 import * as ServerConfig from "./config.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import * as ServerSettingsModule from "./serverSettings.ts";
@@ -55,6 +57,31 @@ const makeFailingSecretStoreLayer = (cause: ServerSecretStore.SecretStoreError) 
       remove: () => Effect.void,
     }),
   );
+
+const makeTrackingSecretStore = () => {
+  const values = new Map<string, Uint8Array>();
+  const service = ServerSecretStore.ServerSecretStore.of({
+    get: (name) => Effect.succeed(Option.fromUndefinedOr(values.get(name))),
+    set: (name, value) => Effect.sync(() => void values.set(name, value)),
+    create: (name, value) =>
+      Effect.sync(() => {
+        if (values.has(name)) throw new Error("secret already exists");
+        values.set(name, value);
+      }),
+    getOrCreateRandom: (name) =>
+      Effect.sync(() => {
+        const value = values.get(name) ?? new Uint8Array([1]);
+        values.set(name, value);
+        return value;
+      }),
+    remove: (name) => Effect.sync(() => void values.delete(name)),
+  });
+  return {
+    values,
+    service,
+    layer: Layer.succeed(ServerSecretStore.ServerSecretStore, service),
+  };
+};
 
 const recordProviderUsage = (provider: string, instanceId: string | null = provider) =>
   Effect.gen(function* () {
@@ -120,6 +147,40 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
       assert.strictEqual(error.cause, cause);
       assert.notInclude(error.message, cause.message);
+    }).pipe(Effect.provide(settingsLayer));
+  });
+
+  it.effect("removes a cloud credential when the runtime vendor changes", () => {
+    const tracking = makeTrackingSecretStore();
+    const configLayer = Layer.fresh(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3code-server-settings-cloud-credential-test-",
+      }),
+    );
+    const settingsLayer = ServerSettingsModule.layer.pipe(
+      Layer.provide(tracking.layer),
+      Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
+      Layer.provideMerge(configLayer),
+    );
+    const runtimeId = CloudRuntimeId.make("primary");
+    const credentialName = cloudRuntimeCredentialName(runtimeId);
+
+    return Effect.gen(function* () {
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* settings.updateSettings({
+        cloudRuntimeInstances: {
+          [runtimeId]: { kind: "e2b", enabled: true, setupCommands: [] },
+        },
+      });
+      yield* tracking.service.set(credentialName, new TextEncoder().encode("old-key"));
+      assert.isTrue(tracking.values.has(credentialName));
+
+      yield* settings.updateSettings({
+        cloudRuntimeInstances: {
+          [runtimeId]: { kind: "daytona", enabled: true, setupCommands: [] },
+        },
+      });
+      assert.isFalse(tracking.values.has(credentialName));
     }).pipe(Effect.provide(settingsLayer));
   });
 
@@ -677,6 +738,22 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("does not use Freebuff as an implicit text-generation fallback", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"providers":{"codex":{"enabled":false},"claudeAgent":{"enabled":false},"freebuff":{"enabled":true}},"providerInstances":{"freebuff":{"driver":"freebuff","enabled":true,"config":{}}}}',
+      );
+
+      const settings = yield* serverSettings.getSettings;
+
+      assert.notEqual(settings.textGenerationModelSelection.instanceId, "freebuff");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("keeps unused providers disabled in existing sparse settings files", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;
@@ -1042,6 +1119,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           cursor: {
             enabled: false,
           },
+          freebuff: {
+            enabled: false,
+          },
           grok: {
             enabled: false,
           },
@@ -1301,6 +1381,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const environment = yield* resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: serverConfig.stateDir,
         rawProviderInstanceId: instanceId,
         env: undefined,
       });

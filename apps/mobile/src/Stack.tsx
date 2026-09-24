@@ -72,6 +72,7 @@ import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsCl
 import { SettingsDiagnosticsRouteScreen } from "./features/diagnostics/SettingsDiagnosticsRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
+import { SettingsEnvironmentCloudRuntimesRouteScreen } from "./features/settings/SettingsEnvironmentCloudRuntimesRouteScreen";
 import {
   SettingsEnvironmentAgentBehaviorRouteScreen,
   SettingsEnvironmentMaintenanceRouteScreen,
@@ -207,6 +208,11 @@ const SettingsContentStack = createNativeStackNavigator({
       screen: SettingsEnvironmentAgentBehaviorRouteScreen,
       linking: "agent-behavior",
       options: { title: "Agent behavior" },
+    }),
+    SettingsEnvironmentCloudRuntimes: createNativeStackScreen({
+      screen: SettingsEnvironmentCloudRuntimesRouteScreen,
+      linking: "cloud-runtimes",
+      options: { title: "Cloud runtimes" },
     }),
     SettingsEnvironmentMaintenance: createNativeStackScreen({
       screen: SettingsEnvironmentMaintenanceRouteScreen,

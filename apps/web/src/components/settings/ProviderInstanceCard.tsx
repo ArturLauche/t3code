@@ -19,6 +19,7 @@ import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "
 import {
   isProviderDriverKind,
   resolveProviderInstanceEnabled,
+  CloudRuntimeId,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
   type ProviderInstanceId,
@@ -40,6 +41,7 @@ import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { DriverOption } from "./providerDriverMeta";
@@ -58,6 +60,7 @@ import {
 } from "./providerStatus";
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const EMPTY_CLOUD_RUNTIME_IDS: ReadonlyArray<string> = [];
 
 function ProviderStatusDiagnostic({
   detail,
@@ -396,6 +399,7 @@ interface ProviderInstanceCardProps {
   readonly onRunUpdate?: (() => void) | undefined;
   readonly onInstallRecommended?: (() => void) | undefined;
   readonly isUpdating?: boolean | undefined;
+  readonly cloudRuntimeIds?: ReadonlyArray<string> | undefined;
 }
 
 /**
@@ -439,6 +443,7 @@ export function ProviderInstanceCard({
   onRunUpdate,
   onInstallRecommended,
   isUpdating = false,
+  cloudRuntimeIds = EMPTY_CLOUD_RUNTIME_IDS,
 }: ProviderInstanceCardProps) {
   const enabled = resolveProviderInstanceEnabled(instance);
   const compatibility = enabled ? liveProvider?.compatibilityAdvisory : undefined;
@@ -561,6 +566,22 @@ export function ProviderInstanceCard({
         : (rest as ProviderInstanceConfig),
     );
   };
+
+  const updateExecutionTarget = (runtimeId: string | null) => {
+    const { executionTarget: _executionTarget, ...rest } = instance;
+    onUpdate(
+      runtimeId
+        ? ({
+            ...rest,
+            executionTarget: { runtimeId: CloudRuntimeId.make(runtimeId), enabled: true },
+          } as ProviderInstanceConfig)
+        : ({ ...rest, executionTarget: null } as unknown as ProviderInstanceConfig),
+    );
+  };
+
+  const staleCloudTarget =
+    instance.executionTarget !== undefined &&
+    !cloudRuntimeIds.includes(instance.executionTarget.runtimeId);
 
   const titleIconNode = driverKind ? (
     <ProviderInstanceIcon
@@ -934,6 +955,73 @@ export function ProviderInstanceCard({
           />
         )}
       </SettingsSection>
+
+      {instance.executionTarget &&
+      (driverOption?.supportsCloudExecution !== true || staleCloudTarget) ? (
+        <SettingsSection
+          title="Cloud execution"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          <SettingsRow
+            title={staleCloudTarget ? "Missing cloud runtime" : "Unsupported cloud target"}
+            description={
+              staleCloudTarget
+                ? "The selected cloud runtime no longer exists. Clear this target to use this device."
+                : "This provider is local-only. Clear the stale target to use this device."
+            }
+            control={
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={readOnly}
+                onClick={() => updateExecutionTarget(null)}
+              >
+                Use this device
+              </Button>
+            }
+          />
+        </SettingsSection>
+      ) : null}
+
+      {driverOption?.supportsCloudExecution === true ? (
+        <SettingsSection
+          title="Cloud execution"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          <SettingsRow
+            title="Execution target"
+            description={
+              cloudRuntimeIds.length > 0
+                ? "Run this provider in a configured cloud sandbox instead of on this device."
+                : "Configure a cloud runtime below before selecting remote execution."
+            }
+            control={
+              <Select
+                value={instance.executionTarget?.runtimeId ?? "local"}
+                onValueChange={(value) => updateExecutionTarget(value === "local" ? null : value)}
+                disabled={readOnly || cloudRuntimeIds.length === 0}
+              >
+                <SelectTrigger size="sm" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="local">This device</SelectItem>
+                  {cloudRuntimeIds.map((runtimeId) => (
+                    <SelectItem key={runtimeId} value={runtimeId}>
+                      {runtimeId}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title="Environment"

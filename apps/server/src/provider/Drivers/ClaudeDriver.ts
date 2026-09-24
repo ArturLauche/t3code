@@ -28,6 +28,11 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts";
+import {
+  makeCloudClaudeSpawner,
+  makeCloudExecutionSpawner,
+} from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import { makeClaudeScopedLimitNames } from "../Layers/claudeUsageLimits.ts";
@@ -101,12 +106,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   metadata: {
     displayName: "Claude",
     supportsMultipleInstances: true,
+    supportsCloudExecution: true,
   },
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => decodeClaudeSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
+  create: ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    executionTarget,
+    enabled,
+    config,
+  }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const cloudRuntime = yield* CloudRuntimeService;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { cwd } = yield* ServerConfig;
@@ -125,6 +140,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         enabled,
         binaryPath: expandHomePath(config.binaryPath),
       } satisfies ClaudeSettings;
+      const cloudTransport =
+        executionTarget?.enabled === true
+          ? yield* makeCloudExecutionSpawner({
+              cloud: cloudRuntime,
+              localSpawner: spawner,
+              runtimeId: executionTarget.runtimeId,
+              instanceId,
+              environment: processEnv,
+              providerEnvironment: environment,
+              sandboxPrefix: `t3-claude-${instanceId}`,
+            })
+          : undefined;
+      const providerSpawner = cloudTransport?.spawner ?? spawner;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -153,6 +181,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const adapterOptions = {
         instanceId,
         environment: processEnv,
+        ...(cloudTransport
+          ? { spawnClaudeCodeProcess: makeCloudClaudeSpawner(cloudTransport.spawnNode) }
+          : {}),
         modelCatalog,
         scopedLimitNames,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
@@ -162,7 +193,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         effectiveConfig,
         processEnv,
         modelCatalog,
-      );
+      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner));
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
@@ -198,7 +229,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.map(stampIdentity),
           ),
         ),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
       );

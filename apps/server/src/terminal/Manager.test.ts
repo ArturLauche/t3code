@@ -2030,6 +2030,7 @@ it.layer(
       const error = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: "/test/state",
         rawProviderInstanceId: providerInstanceId,
         env: undefined,
       }).pipe(Effect.flip);
@@ -2066,6 +2067,13 @@ it.layer(
       config: { homePath: "/configured/claude" },
       expectedHome: "/configured/claude",
     },
+    {
+      name: "Freebuff config",
+      driver: "freebuff",
+      variable: "FREEBUFF_CONFIG_DIR",
+      config: { configDir: "/configured/freebuff" },
+      expectedHome: "/configured/freebuff",
+    },
   ])("prefers $name over the instance environment", ({ driver, variable, config, expectedHome }) =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
@@ -2073,6 +2081,7 @@ it.layer(
       const environment = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: "/test/state",
         rawProviderInstanceId: "configured_home",
         env: undefined,
       });
@@ -2100,6 +2109,7 @@ it.layer(
       const environment = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: "/test/state",
         rawProviderInstanceId: "codex",
         env: undefined,
       });
@@ -2122,6 +2132,7 @@ it.layer(
       const environment = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: "/test/state",
         rawProviderInstanceId: "claudeAgent",
         env: undefined,
       });
@@ -2144,6 +2155,7 @@ it.layer(
       const environment = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: "/test/state",
         rawProviderInstanceId: "codex",
         env: undefined,
       });
@@ -2171,6 +2183,7 @@ it.layer(
       const error = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
         serverSettings,
         path,
+        stateDir: "/test/state",
         rawProviderInstanceId: "codex_unknown",
         env: undefined,
       }).pipe(Effect.flip);
@@ -2212,6 +2225,7 @@ it.layer(
           TerminalManager.resolveProviderInstanceTerminalEnvironment({
             serverSettings,
             path,
+            stateDir: "/test/state",
             rawProviderInstanceId,
             env,
           }),

@@ -81,6 +81,8 @@ export interface AcpSpawnInput {
 export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
+  /** CWD sent in ACP session protocol messages when the process is remote. */
+  readonly protocolCwd?: string;
   readonly resumeSessionId?: string;
   readonly resumeMethod?: "load" | "resume";
   readonly sessionLoadTimeout?: Duration.Input;
@@ -762,7 +764,7 @@ export const make = (
         }
         const resumePayload = {
           sessionId: options.resumeSessionId,
-          cwd: options.cwd,
+          cwd: options.protocolCwd ?? options.cwd,
           mcpServers: options.mcpServers ?? [],
           ...(options.additionalDirectories && options.additionalDirectories.length > 0
             ? { additionalDirectories: options.additionalDirectories }
@@ -791,7 +793,7 @@ export const make = (
       } else if (options.resumeSessionId) {
         const loadPayload = {
           sessionId: options.resumeSessionId,
-          cwd: options.cwd,
+          cwd: options.protocolCwd ?? options.cwd,
           mcpServers: options.mcpServers ?? [],
         } satisfies EffectAcpSchema.LoadSessionRequest;
         const sessionLoadTimeout = Duration.fromInputUnsafe(
@@ -864,7 +866,7 @@ export const make = (
         }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())));
       } else {
         const createPayload = {
-          cwd: options.cwd,
+          cwd: options.protocolCwd ?? options.cwd,
           mcpServers: options.mcpServers ?? [],
           ...(options.additionalDirectories && options.additionalDirectories.length > 0
             ? { additionalDirectories: options.additionalDirectories }
