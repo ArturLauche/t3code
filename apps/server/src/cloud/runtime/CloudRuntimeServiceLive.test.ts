@@ -1,16 +1,18 @@
-import { CloudRuntimeId } from "@t3tools/contracts";
+import { CloudRuntimeId, EnvironmentId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { CloudProcess } from "./CloudProcess.ts";
 import { makeCloudRuntimeService } from "./CloudRuntimeServiceLive.ts";
 import type { CloudVendorAdapter } from "./VendorAdapter.ts";
 
 const runtimeId = CloudRuntimeId.make("primary");
+const environmentId = EnvironmentId.make("test-environment");
 
 const makeSecretStore = () => {
   const values = new Map<string, Uint8Array>();
@@ -61,7 +63,11 @@ const makeVendor = (input: {
         name: "T3 sandbox",
         state: "running",
         createdAt: "2026-09-24T00:00:00.000Z",
-        metadata: input.metadata ?? { t3ManagedExecution: "true", t3RuntimeId: runtimeId },
+        metadata: input.metadata ?? {
+          t3ManagedExecution: "true",
+          t3RuntimeId: runtimeId,
+          t3EnvironmentId: environmentId,
+        },
       },
     ];
   },
@@ -88,23 +94,34 @@ const makeVendor = (input: {
   downloadFile: async () => new Uint8Array(),
 });
 
-const makeService = (vendor: CloudVendorAdapter) => {
+const makeService = (
+  vendor: CloudVendorAdapter,
+  serviceEnvironmentId: EnvironmentId = environmentId,
+) => {
   const secrets = makeSecretStore();
   return Effect.provide(
     makeCloudRuntimeService({
       makeVendor: () => vendor,
     }),
     Layer.merge(
-      ServerSettingsService.layerTest({
-        cloudRuntimeInstances: {
-          [runtimeId]: {
-            kind: "e2b",
-            enabled: true,
-            setupCommands: [],
+      Layer.succeed(
+        ServerEnvironment.ServerEnvironmentIdentity,
+        ServerEnvironment.ServerEnvironmentIdentity.of({
+          getEnvironmentId: Effect.succeed(serviceEnvironmentId),
+        }),
+      ),
+      Layer.merge(
+        ServerSettingsService.layerTest({
+          cloudRuntimeInstances: {
+            [runtimeId]: {
+              kind: "e2b",
+              enabled: true,
+              setupCommands: [],
+            },
           },
-        },
-      }),
-      secrets.layer,
+        }),
+        secrets.layer,
+      ),
     ),
   );
 };
@@ -133,6 +150,18 @@ describe("CloudRuntimeServiceLive", () => {
           .pipe(Effect.map((value) => value.runtimes.length)),
         1,
       );
+    }),
+  );
+
+  it.effect("does not expose sandboxes owned by another T3 environment", () =>
+    Effect.gen(function* () {
+      const service = yield* makeService(
+        makeVendor({ calls: [] }),
+        EnvironmentId.make("other-environment"),
+      );
+      yield* service.setCredential({ runtimeId, apiKey: "secret-api-key" });
+      const result = yield* service.list();
+      assert.equal(result.runtimes[0]?.sandboxes.length, 0);
     }),
   );
 
@@ -256,6 +285,7 @@ describe("CloudRuntimeServiceLive", () => {
           metadata: {
             t3ManagedExecution: "true",
             t3RuntimeId: runtimeId,
+            t3EnvironmentId: environmentId,
             t3ProviderInstanceId: "provider-1",
             secret: "do-not-return",
           },
@@ -266,6 +296,7 @@ describe("CloudRuntimeServiceLive", () => {
       assert.deepEqual(result.runtimes[0]?.sandboxes[0]?.metadata, {
         t3ManagedExecution: "true",
         t3RuntimeId: runtimeId,
+        t3EnvironmentId: environmentId,
         t3ProviderInstanceId: "provider-1",
       });
     }),

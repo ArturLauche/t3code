@@ -183,7 +183,7 @@ export const checkFreebuffProviderStatus = Effect.fn("checkFreebuffProviderStatu
         ? {
             installed: true,
             version,
-            status: "warning",
+            status: "ready",
             auth: { status: "unknown" },
             message:
               "Freebuff is available through T3 Code's experimental terminal bridge. Sign in once from a Freebuff terminal before starting a thread.",

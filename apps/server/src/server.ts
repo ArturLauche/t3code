@@ -184,6 +184,7 @@ const ServerSettingsLayerLive = ServerSettings.layer.pipe(
 const CloudRuntimeLayerLive = CloudRuntimeServiceLive.pipe(
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ServerSecretStore.layer),
+  Layer.provideMerge(ServerEnvironment.identityLayer),
 );
 
 const NativeTelemetryLayerLive = NativeTelemetryClient.layer.pipe(

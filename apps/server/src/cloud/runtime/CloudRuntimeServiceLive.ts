@@ -26,6 +26,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { cloudRuntimeCredentialName } from "./credentialName.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { CloudRuntimeService, type CloudRuntimeServiceShape } from "./CloudRuntimeService.ts";
@@ -82,7 +83,13 @@ const publicSandboxMetadata = (
   metadata: Readonly<Record<string, string>> | undefined,
 ): Readonly<Record<string, string>> | undefined => {
   if (!metadata) return undefined;
-  const allowed = ["name", "t3ManagedExecution", "t3RuntimeId", "t3ProviderInstanceId"] as const;
+  const allowed = [
+    "name",
+    "t3ManagedExecution",
+    "t3RuntimeId",
+    "t3EnvironmentId",
+    "t3ProviderInstanceId",
+  ] as const;
   const entries = allowed.flatMap((key) => {
     const value = metadata[key];
     return value === undefined ? [] : [[key, value] as const];
@@ -135,6 +142,8 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
 ) {
   const serverSettings = yield* ServerSettingsService;
   const secretStore = yield* ServerSecretStore;
+  const environmentIdentity = yield* ServerEnvironment.ServerEnvironmentIdentity;
+  const environmentId = yield* environmentIdentity.getEnvironmentId;
   const makeVendor = options?.makeVendor ?? makeCloudVendorAdapter;
   const withSettingsWriteLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     serverSettings.withWriteLock ? serverSettings.withWriteLock(effect) : effect;
@@ -192,7 +201,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
       });
     }
     const vendor = yield* Effect.try({
-      try: () => makeVendor({ runtimeId, config, apiKey }),
+      try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
       catch: (cause) =>
         mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
     });
@@ -229,7 +238,9 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
     ).pipe(Effect.catchCause(() => Effect.void));
 
   const isManagedSandbox = (sandbox: CloudSandboxSummary, runtimeId: CloudRuntimeId): boolean =>
-    sandbox.metadata?.t3ManagedExecution === "true" && sandbox.metadata?.t3RuntimeId === runtimeId;
+    sandbox.metadata?.t3ManagedExecution === "true" &&
+    sandbox.metadata?.t3RuntimeId === runtimeId &&
+    sandbox.metadata?.t3EnvironmentId === environmentId;
 
   const stampSandboxes = (
     runtimeId: CloudRuntimeId,
@@ -281,7 +292,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
     }
     return yield* Effect.tryPromise({
       try: async () => {
-        const vendor = makeVendor({ runtimeId, config, apiKey });
+        const vendor = makeVendor({ runtimeId, config, apiKey, environmentId });
         try {
           const sandboxes = await vendor.listSandboxes();
           return {
@@ -563,6 +574,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
               candidate.name === input.name &&
               candidate.metadata?.t3ManagedExecution === "true" &&
               candidate.metadata?.t3RuntimeId === input.runtimeId &&
+              candidate.metadata?.t3EnvironmentId === environmentId &&
               candidate.metadata.t3SetupHash === setupHashValue &&
               candidate.metadata.t3ProviderInstanceId === input.metadata?.t3ProviderInstanceId &&
               candidate.state !== "stopped" &&
@@ -684,7 +696,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
       });
     }
     const vendor = yield* Effect.try({
-      try: () => makeVendor({ runtimeId, config, apiKey }),
+      try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
       catch: (cause) =>
         mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
     });

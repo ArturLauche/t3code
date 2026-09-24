@@ -174,6 +174,8 @@ export interface CodexSessionRuntimeOptions {
   readonly launchArgs?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly cwd: string;
+  /** CWD sent in provider protocol messages when the process is remote. */
+  readonly protocolCwd?: string;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
@@ -2440,7 +2442,7 @@ export const makeCodexSessionRuntime = (
         client,
         threadId: options.threadId,
         runtimeMode: options.runtimeMode,
-        cwd: options.cwd,
+        cwd: options.protocolCwd ?? options.cwd,
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
@@ -2450,7 +2452,7 @@ export const makeCodexSessionRuntime = (
       const session = {
         ...(yield* Ref.get(sessionRef)),
         status: "ready",
-        cwd: opened.cwd,
+        cwd: options.cwd,
         model: opened.model,
         resumeCursor: { threadId: providerThreadId },
         updatedAt: yield* nowIso,

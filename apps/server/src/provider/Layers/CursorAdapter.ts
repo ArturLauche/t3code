@@ -41,6 +41,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import type { CloudRemoteCwdResolver } from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -100,6 +101,7 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
 export interface CursorAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly childProcessSpawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly remoteCwdFor?: CloudRemoteCwdResolver;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   /**
@@ -511,6 +513,7 @@ export function makeCursorAdapter(
           }
 
           const cwd = path.resolve(input.cwd.trim());
+          const protocolCwd = options?.remoteCwdFor?.(cwd);
           const cursorModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
@@ -559,6 +562,7 @@ export function makeCursorAdapter(
               : {}),
             childProcessSpawner,
             cwd,
+            ...(protocolCwd ? { protocolCwd } : {}),
             runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "t3-code", version: "0.0.0" },

@@ -109,13 +109,21 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
               sandboxPrefix: `t3-grok-${instanceId}`,
             })
           : undefined;
+      const providerSpawner = cloudTransport?.spawner ?? spawner;
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
         environment: processEnv,
-        ...(cloudTransport ? { childProcessSpawner: cloudTransport.spawner } : {}),
+        ...(cloudTransport
+          ? {
+              childProcessSpawner: cloudTransport.spawner,
+              remoteCwdFor: cloudTransport.remoteCwdFor,
+            }
+          : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });
-      const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
+      );
 
       const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv, cwd).pipe(
         Effect.flatMap((snapshot) =>
@@ -130,7 +138,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
         Effect.provideService(Crypto.Crypto, crypto),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
       );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);

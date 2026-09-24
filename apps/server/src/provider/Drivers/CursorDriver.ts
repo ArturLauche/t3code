@@ -145,6 +145,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
               sandboxPrefix: `t3-cursor-${instanceId}`,
             })
           : undefined;
+      const providerSpawner = cloudTransport?.spawner ?? spawner;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -156,7 +157,9 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         ),
       );
 
-      const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
+      );
 
       const modelDiscovery = yield* makeCursorModelDiscovery(effectiveConfig, processEnv);
       const checkProvider = checkCursorProviderStatus(
@@ -174,7 +177,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         Effect.map(stampIdentity),
         Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(Crypto.Crypto, crypto),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
       );
@@ -223,7 +226,12 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         yield* makeCursorCommandCatalog(managedSnapshot);
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
-        ...(cloudTransport ? { childProcessSpawner: cloudTransport.spawner } : {}),
+        ...(cloudTransport
+          ? {
+              childProcessSpawner: cloudTransport.spawner,
+              remoteCwdFor: cloudTransport.remoteCwdFor,
+            }
+          : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
         onAvailableCommands: (commands, cwd) =>

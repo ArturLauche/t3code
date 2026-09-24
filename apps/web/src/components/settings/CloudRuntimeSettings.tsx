@@ -28,6 +28,10 @@ const RUNTIME_KINDS: ReadonlyArray<{ value: CloudRuntimeKind; label: string }> =
 ];
 
 const RUNTIME_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+const isValidRuntimeId = (value: string): boolean =>
+  RUNTIME_ID_PATTERN.test(value) && value !== "local";
+const isValidCloudApiUrl = (value: string): boolean =>
+  value.trim() === "" || /^https:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/u.test(value.trim());
 
 type RuntimeConfigPatch = Partial<{
   kind: CloudRuntimeKind;
@@ -45,6 +49,18 @@ function optionalText(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
+
+const runtimeConnectionFingerprint = (config: CloudRuntimeConfig): string =>
+  JSON.stringify([
+    config.kind,
+    config.enabled,
+    config.region ?? null,
+    config.template ?? null,
+    config.domain ?? null,
+    config.apiUrl ?? null,
+    config.autoPauseMinutes ?? null,
+    config.setupCommands,
+  ]);
 
 function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
@@ -97,26 +113,27 @@ export function CloudRuntimeSettings({
 }) {
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const listRuntimes = useAtomCommand(serverEnvironment.cloudRuntimeList, { reportFailure: false });
+  const listRuntimes = useAtomCommand(serverEnvironment.cloudRuntimeList, { reportFailure: true });
   const setCredential = useAtomCommand(serverEnvironment.cloudRuntimeSetCredential, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const clearCredential = useAtomCommand(serverEnvironment.cloudRuntimeClearCredential, {
-    reportFailure: false,
+    reportFailure: true,
   });
-  const testRuntime = useAtomCommand(serverEnvironment.cloudRuntimeTest, { reportFailure: false });
+  const testRuntime = useAtomCommand(serverEnvironment.cloudRuntimeTest, { reportFailure: true });
   const createSandbox = useAtomCommand(serverEnvironment.cloudRuntimeCreateSandbox, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const listSandboxes = useAtomCommand(serverEnvironment.cloudRuntimeListSandboxes, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const sandboxAction = useAtomCommand(serverEnvironment.cloudRuntimeSandboxAction, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const [runtimes, setRuntimes] = useState<ReadonlyArray<CloudRuntimeInstance>>([]);
   const [newRuntimeId, setNewRuntimeId] = useState("");
   const [apiKeys, setApiKeys] = useState<Readonly<Record<string, string>>>({});
+  const [apiUrlDrafts, setApiUrlDrafts] = useState<Readonly<Record<string, string>>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const refreshGeneration = useRef(0);
 
@@ -125,6 +142,7 @@ export function CloudRuntimeSettings({
     // health state across an environment switch.
     setRuntimes([]);
     setApiKeys({});
+    setApiUrlDrafts({});
     setBusyId(null);
   }, [environmentId]);
 
@@ -151,7 +169,6 @@ export function CloudRuntimeSettings({
       if (!current) return;
       updateSettings({
         cloudRuntimeInstances: {
-          ...configuredRuntimes,
           [id]: mergeRuntimeConfig(current, patch),
         },
       });
@@ -161,13 +178,12 @@ export function CloudRuntimeSettings({
 
   const addRuntime = useCallback(() => {
     const id = newRuntimeId.trim();
-    if (!RUNTIME_ID_PATTERN.test(id) || configuredRuntimes[id as CloudRuntimeId]) {
+    if (!isValidRuntimeId(id) || configuredRuntimes[id as CloudRuntimeId]) {
       return;
     }
     const runtimeId = CloudRuntimeId.make(id);
     updateSettings({
       cloudRuntimeInstances: {
-        ...configuredRuntimes,
         [runtimeId]: {
           kind: "e2b",
           enabled: true,
@@ -192,9 +208,7 @@ export function CloudRuntimeSettings({
           // Continue removing the configuration; the server-side settings
           // transaction is the authoritative credential cleanup path.
         } finally {
-          const next = { ...configuredRuntimes };
-          delete next[runtime.id];
-          updateSettings({ cloudRuntimeInstances: next });
+          updateSettings({ cloudRuntimeInstances: { [runtime.id]: null } });
           setApiKeys((current) => {
             const copy = { ...current };
             delete copy[runtime.id];
@@ -305,7 +319,24 @@ export function CloudRuntimeSettings({
     () =>
       Object.entries(configuredRuntimes).map(([runtimeId, config]) => {
         const listed = runtimes.find((runtime) => runtime.id === runtimeId);
-        if (listed) return listed;
+        if (listed) {
+          const connectionChanged =
+            runtimeConnectionFingerprint(listed.config) !== runtimeConnectionFingerprint(config);
+          return {
+            ...listed,
+            config,
+            ...(connectionChanged
+              ? {
+                  sandboxes: [],
+                  health: {
+                    status: config.enabled ? "checking" : "disabled",
+                    message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+                    checkedAt: new Date().toISOString(),
+                  },
+                }
+              : {}),
+          } satisfies CloudRuntimeInstance;
+        }
         return {
           id: CloudRuntimeId.make(runtimeId),
           config,
@@ -458,10 +489,22 @@ export function CloudRuntimeSettings({
                   control={
                     <Input
                       size="sm"
-                      value={config.apiUrl ?? ""}
+                      value={apiUrlDrafts[runtime.id] ?? config.apiUrl ?? ""}
                       placeholder="Vendor default"
                       disabled={readOnly}
-                      onValueChange={(value) => updateRuntime(runtime.id, { apiUrl: value })}
+                      onValueChange={(value) =>
+                        setApiUrlDrafts((current) => ({ ...current, [runtime.id]: value }))
+                      }
+                      onBlur={() => {
+                        const value = apiUrlDrafts[runtime.id] ?? config.apiUrl ?? "";
+                        if (!isValidCloudApiUrl(value)) return;
+                        updateRuntime(runtime.id, { apiUrl: value });
+                        setApiUrlDrafts((current) => {
+                          const next = { ...current };
+                          delete next[runtime.id];
+                          return next;
+                        });
+                      }}
                     />
                   }
                 />
@@ -504,8 +547,7 @@ export function CloudRuntimeSettings({
                         updateRuntime(runtime.id, {
                           setupCommands: event.currentTarget.value
                             .split(/\r?\n/u)
-                            .map((line) => line.trim())
-                            .filter(Boolean),
+                            .filter((line) => line.trim().length > 0),
                         })
                       }
                     />
@@ -671,7 +713,7 @@ export function CloudRuntimeSettings({
                 size="xs"
                 disabled={
                   readOnly ||
-                  !RUNTIME_ID_PATTERN.test(newRuntimeId.trim()) ||
+                  !isValidRuntimeId(newRuntimeId.trim()) ||
                   configuredRuntimes[newRuntimeId.trim() as CloudRuntimeId] !== undefined
                 }
                 onClick={addRuntime}

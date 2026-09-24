@@ -916,7 +916,9 @@ export function EnvironmentProviderSettings({
         selected={mode === "list" && selectedRow?.instanceId === row.instanceId}
         onSelect={mode === "list" ? () => setSelectedInstanceId(row.instanceId) : undefined}
         readOnly={readOnly}
-        cloudRuntimeIds={Object.keys(settings.cloudRuntimeInstances)}
+        cloudRuntimeIds={Object.entries(settings.cloudRuntimeInstances)
+          .filter(([, config]) => config.enabled)
+          .map(([runtimeId]) => runtimeId)}
         setup={
           mode === "editor" && row.driver === "antigravity" ? (
             <ProviderSetupSection

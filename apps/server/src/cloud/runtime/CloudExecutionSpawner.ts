@@ -73,6 +73,8 @@ type CloudSpawnNode = (
   pty?: CloudPtyOptions,
 ) => Effect.Effect<CloudProcess, PlatformError.PlatformError, Scope.Scope>;
 
+export type CloudRemoteCwdResolver = (cwd: string) => string | undefined;
+
 const cloudPlatformError = (cause: unknown): PlatformError.PlatformError =>
   PlatformError.systemError({
     _tag: "Unknown",
@@ -223,6 +225,12 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
   const fileSystem = yield* FileSystem.FileSystem;
   const prepared = new Map<string, CloudExecutionHandle>();
   const activeProcesses = new Map<string, number>();
+  const sandboxNameFor = (cwd: string): string => {
+    const digest = NodeCrypto.createHash("sha256").update(cwd).digest("hex").slice(0, 12);
+    return `${input.sandboxPrefix}-${digest}`.replaceAll(/[^a-zA-Z0-9_-]/gu, "-");
+  };
+  const remoteCwdFor: CloudRemoteCwdResolver = (cwd) =>
+    prepared.get(cwd)?.remoteCwd ?? `/workspace/${sandboxNameFor(cwd)}`;
   const invalidatePrepared = (cwd: string) => {
     if ((activeProcesses.get(cwd) ?? 0) === 0) prepared.delete(cwd);
   };
@@ -237,8 +245,7 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
       Effect.gen(function* () {
         const existing = prepared.get(cwd);
         if (existing) return existing;
-        const digest = NodeCrypto.createHash("sha256").update(cwd).digest("hex").slice(0, 12);
-        const name = `${input.sandboxPrefix}-${digest}`.replaceAll(/[^a-zA-Z0-9_-]/gu, "-");
+        const name = sandboxNameFor(cwd);
         const archive = yield* collectArchive(
           fileSystem,
           input.localSpawner,
@@ -342,6 +349,7 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
   return {
     spawner: ChildProcessSpawner.make(spawn),
     spawnNode,
+    remoteCwdFor,
   };
 });
 

@@ -39,6 +39,12 @@ export type CloudRuntimeConfig = typeof CloudRuntimeConfig.Type;
 export const CloudRuntimeConfigMap = Schema.Record(CloudRuntimeId, CloudRuntimeConfig);
 export type CloudRuntimeConfigMap = typeof CloudRuntimeConfigMap.Type;
 
+export const CloudRuntimeConfigMapPatch = Schema.Record(
+  CloudRuntimeId,
+  Schema.NullOr(CloudRuntimeConfig),
+);
+export type CloudRuntimeConfigMapPatch = typeof CloudRuntimeConfigMapPatch.Type;
+
 /** A provider instance's optional cloud execution destination. */
 export const ProviderExecutionTarget = Schema.Struct({
   runtimeId: CloudRuntimeId,

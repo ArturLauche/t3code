@@ -575,7 +575,7 @@ export function ProviderInstanceCard({
             ...rest,
             executionTarget: { runtimeId: CloudRuntimeId.make(runtimeId), enabled: true },
           } as ProviderInstanceConfig)
-        : (rest as ProviderInstanceConfig),
+        : ({ ...rest, executionTarget: null } as unknown as ProviderInstanceConfig),
     );
   };
 

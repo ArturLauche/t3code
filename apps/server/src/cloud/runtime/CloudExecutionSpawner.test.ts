@@ -101,6 +101,7 @@ describe("CloudExecutionSpawner", () => {
           },
         }),
       );
+      expect(transport.remoteCwdFor(process.cwd())).toBe("/workspace/test");
       remote.complete(0);
       yield* transport.spawnNode(
         ChildProcess.make("codex", ["second"], {

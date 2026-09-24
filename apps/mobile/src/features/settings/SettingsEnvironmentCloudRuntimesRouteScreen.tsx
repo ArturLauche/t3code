@@ -4,7 +4,7 @@ import {
   type CloudRuntimeInstance,
   type CloudRuntimeKind,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -30,6 +30,10 @@ const RUNTIME_KINDS: ReadonlyArray<{ value: CloudRuntimeKind; label: string }> =
   { value: "daytona", label: "Daytona" },
 ];
 const RUNTIME_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+const isValidRuntimeId = (value: string): boolean =>
+  RUNTIME_ID_PATTERN.test(value) && value !== "local";
+const isValidCloudApiUrl = (value: string): boolean =>
+  value.trim() === "" || /^https:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/u.test(value.trim());
 
 type ConfigPatch = Partial<{
   kind: CloudRuntimeKind;
@@ -74,6 +78,18 @@ function applyPatch(config: CloudRuntimeConfig, patch: ConfigPatch): CloudRuntim
   }
   return next;
 }
+
+const runtimeConnectionFingerprint = (config: CloudRuntimeConfig): string =>
+  JSON.stringify([
+    config.kind,
+    config.enabled,
+    config.region ?? null,
+    config.template ?? null,
+    config.domain ?? null,
+    config.apiUrl ?? null,
+    config.autoPauseMinutes ?? null,
+    config.setupCommands,
+  ]);
 
 function healthText(runtime: CloudRuntimeInstance): string {
   if (runtime.health.message) return runtime.health.message;
@@ -140,35 +156,43 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
   const settings = target.settings;
   const [runtimes, setRuntimes] = useState<ReadonlyArray<CloudRuntimeInstance>>([]);
   const [apiKeys, setApiKeys] = useState<Readonly<Record<string, string>>>({});
+  const [apiUrlDrafts, setApiUrlDrafts] = useState<Readonly<Record<string, string>>>({});
   const [newRuntimeId, setNewRuntimeId] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const refreshGeneration = useRef(0);
 
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "cloud runtime settings update",
     reportFailure: true,
   });
-  const listRuntimes = useAtomCommand(serverEnvironment.cloudRuntimeList, { reportFailure: false });
+  const listRuntimes = useAtomCommand(serverEnvironment.cloudRuntimeList, { reportFailure: true });
   const setCredential = useAtomCommand(serverEnvironment.cloudRuntimeSetCredential, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const clearCredential = useAtomCommand(serverEnvironment.cloudRuntimeClearCredential, {
-    reportFailure: false,
+    reportFailure: true,
   });
-  const testRuntime = useAtomCommand(serverEnvironment.cloudRuntimeTest, { reportFailure: false });
+  const testRuntime = useAtomCommand(serverEnvironment.cloudRuntimeTest, { reportFailure: true });
   const createSandbox = useAtomCommand(serverEnvironment.cloudRuntimeCreateSandbox, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const listSandboxes = useAtomCommand(serverEnvironment.cloudRuntimeListSandboxes, {
-    reportFailure: false,
+    reportFailure: true,
   });
   const sandboxAction = useAtomCommand(serverEnvironment.cloudRuntimeSandboxAction, {
-    reportFailure: false,
+    reportFailure: true,
   });
 
   const refreshRuntimes = useCallback(
     async (isCancelled?: () => boolean) => {
+      const generation = refreshGeneration.current + 1;
+      refreshGeneration.current = generation;
       const result = await listRuntimes({ environmentId, input: {} });
-      if (isCancelled?.() !== true && result._tag === "Success") {
+      if (
+        generation === refreshGeneration.current &&
+        isCancelled?.() !== true &&
+        result._tag === "Success"
+      ) {
         setRuntimes(result.value.runtimes);
       }
     },
@@ -178,8 +202,10 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
   useEffect(() => {
     // Runtime ids are only unique within an environment. Never carry a key
     // or health snapshot from the previously selected environment.
+    refreshGeneration.current += 1;
     setRuntimes([]);
     setApiKeys({});
+    setApiUrlDrafts({});
     setBusyId(null);
   }, [environmentId]);
 
@@ -197,7 +223,24 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
     () =>
       Object.entries(configuredRuntimes).map(([runtimeId, config]) => {
         const listed = runtimes.find((runtime) => runtime.id === runtimeId);
-        if (listed) return listed;
+        if (listed) {
+          const connectionChanged =
+            runtimeConnectionFingerprint(listed.config) !== runtimeConnectionFingerprint(config);
+          return {
+            ...listed,
+            config,
+            ...(connectionChanged
+              ? {
+                  sandboxes: [],
+                  health: {
+                    status: config.enabled ? "checking" : "disabled",
+                    message: config.enabled ? "Checking…" : "Disabled",
+                    checkedAt: new Date().toISOString(),
+                  },
+                }
+              : {}),
+          } satisfies CloudRuntimeInstance;
+        }
         return {
           id: CloudRuntimeId.make(runtimeId),
           config,
@@ -221,7 +264,6 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
       input: {
         patch: {
           cloudRuntimeInstances: {
-            ...configuredRuntimes,
             [id]: applyPatch(current, patch),
           },
         },
@@ -231,22 +273,26 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
 
   const addRuntime = () => {
     const value = newRuntimeId.trim();
-    if (!RUNTIME_ID_PATTERN.test(value) || configuredRuntimes[value as CloudRuntimeId]) return;
+    if (!isValidRuntimeId(value) || configuredRuntimes[value as CloudRuntimeId]) return;
     const id = CloudRuntimeId.make(value);
     void updateSettings({
       environmentId,
       input: {
         patch: {
           cloudRuntimeInstances: {
-            ...configuredRuntimes,
             [id]: { kind: "e2b", enabled: true, setupCommands: [] },
           },
         },
       },
     })
-      .then(() => refreshRuntimes())
+      .then((result) => {
+        if (result._tag === "Success") {
+          setNewRuntimeId("");
+          return refreshRuntimes();
+        }
+        return undefined;
+      })
       .catch(() => undefined);
-    setNewRuntimeId("");
   };
 
   const removeRuntime = (id: CloudRuntimeId) => {
@@ -257,11 +303,9 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
       } catch {
         // The settings update below also removes stale credentials server-side.
       } finally {
-        const next = { ...configuredRuntimes };
-        delete next[id];
         void updateSettings({
           environmentId,
-          input: { patch: { cloudRuntimeInstances: next } },
+          input: { patch: { cloudRuntimeInstances: { [id]: null } } },
         });
         setApiKeys((current) => {
           const copy = { ...current };
@@ -361,8 +405,20 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                 />
                 <RuntimeInput
                   label="API endpoint"
-                  value={config.apiUrl ?? ""}
-                  onChangeText={(apiUrl) => updateRuntime(runtime.id, { apiUrl })}
+                  value={apiUrlDrafts[runtime.id] ?? config.apiUrl ?? ""}
+                  onChangeText={(value) =>
+                    setApiUrlDrafts((current) => ({ ...current, [runtime.id]: value }))
+                  }
+                  onBlur={() => {
+                    const value = apiUrlDrafts[runtime.id] ?? config.apiUrl ?? "";
+                    if (!isValidCloudApiUrl(value)) return;
+                    updateRuntime(runtime.id, { apiUrl: value });
+                    setApiUrlDrafts((current) => {
+                      const next = { ...current };
+                      delete next[runtime.id];
+                      return next;
+                    });
+                  }}
                 />
                 <RuntimeInput
                   label="Auto-pause minutes"
@@ -386,10 +442,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   multiline
                   onChangeText={(value) =>
                     updateRuntime(runtime.id, {
-                      setupCommands: value
-                        .split(/\r?\n/u)
-                        .map((line) => line.trim())
-                        .filter(Boolean),
+                      setupCommands: value.split(/\r?\n/u).filter((line) => line.trim().length > 0),
                     })
                   }
                 />
@@ -555,7 +608,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
           <RuntimeButton
             label="Add runtime"
             disabled={
-              !RUNTIME_ID_PATTERN.test(newRuntimeId.trim()) ||
+              !isValidRuntimeId(newRuntimeId.trim()) ||
               configuredRuntimes[newRuntimeId.trim() as CloudRuntimeId] !== undefined
             }
             onPress={addRuntime}
@@ -570,6 +623,7 @@ function RuntimeInput(props: {
   readonly label: string;
   readonly value: string;
   readonly onChangeText: (value: string) => void;
+  readonly onBlur?: () => void;
   readonly secureTextEntry?: boolean;
   readonly multiline?: boolean;
   readonly keyboardType?: "default" | "number-pad";
@@ -583,6 +637,7 @@ function RuntimeInput(props: {
         className="rounded-xl border border-border bg-background px-3 py-2 text-base text-foreground"
         value={props.value}
         onChangeText={props.onChangeText}
+        onBlur={props.onBlur}
         secureTextEntry={props.secureTextEntry}
         multiline={props.multiline}
         keyboardType={props.keyboardType}

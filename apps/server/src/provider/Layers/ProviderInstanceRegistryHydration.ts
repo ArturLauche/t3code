@@ -73,14 +73,15 @@ import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistry
 export const deriveProviderInstanceConfigMap = (
   settings: ServerSettings,
 ): ProviderInstanceConfigMap => {
-  // A deleted runtime must not strand a provider instance in an unavailable
-  // state. Keep the stale target in settings for explicit UI recovery, but
-  // never route the live registry to a runtime that no longer exists.
+  // A deleted or disabled runtime must not strand a provider instance in an
+  // unavailable state. Keep the target in settings for explicit UI recovery,
+  // but never route the live registry to a runtime that cannot accept work.
   const merged: Record<string, ProviderInstanceConfig> = Object.fromEntries(
     Object.entries(settings.providerInstances).map(([instanceId, instance]) => {
       if (
         instance.executionTarget !== undefined &&
-        !(instance.executionTarget.runtimeId in settings.cloudRuntimeInstances)
+        (!(instance.executionTarget.runtimeId in settings.cloudRuntimeInstances) ||
+          settings.cloudRuntimeInstances[instance.executionTarget.runtimeId]?.enabled !== true)
       ) {
         const { executionTarget: _staleTarget, ...rest } = instance;
         return [instanceId, rest];

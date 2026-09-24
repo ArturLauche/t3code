@@ -12,7 +12,8 @@
  */
 import {
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  type CloudRuntimeId,
+  type CloudRuntimeConfig,
+  CloudRuntimeId,
   DEFAULT_SERVER_SETTINGS,
   ModelSelection,
   ProjectScript,
@@ -66,6 +67,15 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+
+const sameCloudCredentialScope = (
+  previous: CloudRuntimeConfig,
+  next: CloudRuntimeConfig,
+): boolean =>
+  previous.kind === next.kind &&
+  (previous.domain ?? null) === (next.domain ?? null) &&
+  (previous.apiUrl ?? null) === (next.apiUrl ?? null) &&
+  (previous.region ?? null) === (next.region ?? null);
 
 /**
  * Fold the legacy in-config `enabled` flag into the envelope-level
@@ -341,7 +351,12 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
   // (codex enabled) when the Providers UI has only written providerInstances.
   const fallbackEntry = Object.entries(settings.providers).find(([driver, provider]) => {
     const instance = settings.providerInstances[ProviderInstanceId.make(driver)];
-    return instance === undefined ? provider.enabled : resolveProviderInstanceEnabled(instance);
+    const enabled =
+      instance === undefined ? provider.enabled : resolveProviderInstanceEnabled(instance);
+    return (
+      enabled &&
+      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[ProviderDriverKind.make(driver)] !== undefined
+    );
   });
   const fallback = fallbackEntry ? ProviderDriverKind.make(fallbackEntry[0]) : undefined;
   if (!fallback) {
@@ -871,10 +886,12 @@ const make = Effect.gen(function* () {
       }
 
       // Cloud credentials live outside settings.json. Remove them in the
-      // same locked update transaction when a runtime is deleted, otherwise
-      // re-adding the same id would silently revive an old API key.
-      for (const runtimeId of Object.keys(current.cloudRuntimeInstances)) {
-        if (runtimeId in next.cloudRuntimeInstances) continue;
+      // same locked update transaction when a runtime is deleted or its
+      // vendor/endpoint identity changes; otherwise a new destination could
+      // silently receive the old account's key.
+      for (const [runtimeId, previousConfig] of Object.entries(current.cloudRuntimeInstances)) {
+        const nextConfig = next.cloudRuntimeInstances[CloudRuntimeId.make(runtimeId)];
+        if (nextConfig && sameCloudCredentialScope(previousConfig, nextConfig)) continue;
         changes.push({
           kind: "remove",
           secretName: cloudRuntimeCredentialName(runtimeId as CloudRuntimeId),

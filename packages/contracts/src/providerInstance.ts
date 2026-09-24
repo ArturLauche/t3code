@@ -134,6 +134,23 @@ export const ProviderInstanceConfig = Schema.Struct({
 export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
 
 /**
+ * Patch form used when replacing the provider-instance map. An omitted
+ * execution target means an older client did not know about cloud routing, so
+ * the server preserves the existing target; an explicit null clears it.
+ */
+export const ProviderInstanceConfigPatch = Schema.Struct({
+  ...ProviderInstanceConfig.fields,
+  executionTarget: Schema.optionalKey(Schema.NullOr(ProviderExecutionTarget)),
+});
+export type ProviderInstanceConfigPatch = typeof ProviderInstanceConfigPatch.Type;
+
+export const ProviderInstanceConfigMapPatch = Schema.Record(
+  ProviderInstanceId,
+  ProviderInstanceConfigPatch,
+);
+export type ProviderInstanceConfigMapPatch = typeof ProviderInstanceConfigMapPatch.Type;
+
+/**
  * Map shape for `ServerSettings.providerInstances`. Keyed by
  * `ProviderInstanceId`, values are envelopes the registry feeds to drivers.
  */

@@ -51,6 +51,7 @@ export const makeCloudVendorAdapter = (input: {
   readonly runtimeId: CloudRuntimeId;
   readonly config: CloudRuntimeConfig;
   readonly apiKey: string;
+  readonly environmentId: string;
 }): CloudVendorAdapter => {
   switch (input.config.kind) {
     case "e2b":
@@ -105,13 +106,13 @@ type E2BCompatibleSandbox = {
       readonly onData: (data: Uint8Array) => void;
     }): Promise<{
       readonly pid: number;
-      readonly sendInput: (data: string | Uint8Array) => Promise<void>;
       readonly kill: () => Promise<boolean>;
-      readonly resize: (cols: number, rows: number) => Promise<void>;
       readonly wait: () => Promise<{ readonly exitCode: number }>;
       readonly disconnect?: () => Promise<void>;
       readonly exitCode?: number;
     }>;
+    sendInput(pid: number, data: Uint8Array): Promise<void>;
+    resize(pid: number, size: { readonly cols: number; readonly rows: number }): Promise<void>;
   };
   readonly files: {
     write(path: string, data: Uint8Array): Promise<unknown>;
@@ -181,6 +182,27 @@ const safeVendorProcessError = (secrets: ReadonlyArray<string>, cause: unknown):
   return new Error((message || "Cloud process operation failed.").slice(0, 1_000));
 };
 
+const commandResultFromError = (cause: unknown): CloudCommandResult | undefined => {
+  if (typeof cause !== "object" || cause === null) return undefined;
+  const candidate = cause as {
+    readonly exitCode?: unknown;
+    readonly stdout?: unknown;
+    readonly stderr?: unknown;
+  };
+  if (
+    typeof candidate.exitCode !== "number" ||
+    typeof candidate.stdout !== "string" ||
+    typeof candidate.stderr !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    exitCode: candidate.exitCode,
+    stdout: candidate.stdout.slice(0, 1_000_000),
+    stderr: candidate.stderr.slice(0, 1_000_000),
+  };
+};
+
 const shellCommand = (input: {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -219,6 +241,7 @@ const makeE2BCompatibleVendor = (
     readonly runtimeId: CloudRuntimeId;
     readonly config: CloudRuntimeConfig;
     readonly apiKey: string;
+    readonly environmentId: string;
   },
   kind: "e2b" | "novita",
 ): CloudVendorAdapter => {
@@ -255,7 +278,12 @@ const makeE2BCompatibleVendor = (
       const Sandbox = await load();
       const paginator = Sandbox.list({
         ...connectionOptions(input),
-        query: { metadata: { t3RuntimeId: input.runtimeId } },
+        query: {
+          metadata: {
+            t3RuntimeId: input.runtimeId,
+            t3EnvironmentId: input.environmentId,
+          },
+        },
       });
       const infos: Array<unknown> = [];
       while (paginator.hasNext) infos.push(...(await paginator.nextItems()));
@@ -285,6 +313,7 @@ const makeE2BCompatibleVendor = (
           ...create.metadata,
           t3ManagedExecution: "true",
           t3RuntimeId: input.runtimeId,
+          t3EnvironmentId: input.environmentId,
           ...(create.name ? { name: create.name } : {}),
         },
       });
@@ -296,15 +325,24 @@ const makeE2BCompatibleVendor = (
     },
     execute: async (sandboxId, command) => {
       const sandbox = await connect(sandboxId);
-      const result = await sandbox.commands.run(shellCommand(command), e2bCommandOptions(command));
-      if (result.exitCode === undefined) {
-        throw new Error("Cloud command completed without an exit code.");
+      try {
+        const result = await sandbox.commands.run(
+          shellCommand(command),
+          e2bCommandOptions(command),
+        );
+        if (result.exitCode === undefined) {
+          throw new Error("Cloud command completed without an exit code.");
+        }
+        return {
+          exitCode: result.exitCode,
+          stdout: (result.stdout ?? "").slice(0, 1_000_000),
+          stderr: (result.stderr ?? "").slice(0, 1_000_000),
+        };
+      } catch (cause) {
+        const commandResult = commandResultFromError(cause);
+        if (commandResult) return commandResult;
+        throw cause;
       }
-      return {
-        exitCode: result.exitCode,
-        stdout: (result.stdout ?? "").slice(0, 1_000_000),
-        stderr: (result.stderr ?? "").slice(0, 1_000_000),
-      };
     },
     startProcess: async (sandboxId, command) => {
       const sandbox = await connect(sandboxId);
@@ -312,10 +350,11 @@ const makeE2BCompatibleVendor = (
       const safeProcessError = (cause: unknown) =>
         safeVendorProcessError([input.apiKey, ...Object.values(command.env)], cause);
       if (command.pty) {
-        if (!sandbox.pty) {
+        const pty = sandbox.pty;
+        if (!pty) {
           throw new Error("The selected cloud vendor does not expose a PTY API.");
         }
-        const handle = await sandbox.pty.create({
+        const handle = await pty.create({
           cols: command.pty.cols,
           rows: command.pty.rows,
           ...(command.cwd ? { cwd: command.cwd } : {}),
@@ -326,21 +365,23 @@ const makeE2BCompatibleVendor = (
         process.pid = handle.pid;
         process.stdin.on("data", (data: Buffer) => {
           if (process.killed || process.completed) return;
-          void handle
-            .sendInput(data)
+          void pty
+            .sendInput(handle.pid, data)
             .catch((cause) => process.emit("error", safeProcessError(cause)));
         });
         process.stdin.once("end", () => {
           if (process.killed || process.completed) return;
-          void handle
-            .sendInput("\u0004")
+          void pty
+            .sendInput(handle.pid, new Uint8Array([4]))
             .catch((cause) => process.emit("error", safeProcessError(cause)));
         });
         process.setKillHandler(() => handle.kill());
-        process.setResizeHandler((cols, rows) => handle.resize(cols, rows));
+        process.setResizeHandler((cols, rows) =>
+          pty.resize(handle.pid, { cols, rows }).then(() => undefined),
+        );
         // The vendor PTY starts an interactive shell. Replace that shell with
         // the provider process so the PTY completes when the agent exits.
-        await handle.sendInput(`exec ${shellCommand(command)}\n`);
+        await pty.sendInput(handle.pid, Buffer.from(`exec ${shellCommand(command)}\n`));
         void handle
           .wait()
           .then((result) => process.complete(result.exitCode))
@@ -537,6 +578,7 @@ const makeDaytonaVendor = (input: {
   readonly runtimeId: CloudRuntimeId;
   readonly config: CloudRuntimeConfig;
   readonly apiKey: string;
+  readonly environmentId: string;
 }): CloudVendorAdapter => {
   const load = async (): Promise<DaytonaClient> => {
     const { Daytona } = await import("@daytona/sdk");
@@ -569,7 +611,10 @@ const makeDaytonaVendor = (input: {
       const result: Array<CloudSandboxSummary> = [];
       try {
         for await (const sandbox of daytona.list({
-          labels: { t3RuntimeId: input.runtimeId },
+          labels: {
+            t3RuntimeId: input.runtimeId,
+            t3EnvironmentId: input.environmentId,
+          },
         })) {
           result.push(summarize(sandbox));
         }
@@ -586,6 +631,7 @@ const makeDaytonaVendor = (input: {
             ...create.metadata,
             t3ManagedExecution: "true",
             t3RuntimeId: input.runtimeId,
+            t3EnvironmentId: input.environmentId,
             ...(create.name ? { name: create.name } : {}),
           },
           ...(create.name ? { name: create.name } : {}),

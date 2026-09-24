@@ -185,6 +185,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               sandboxPrefix: `t3-codex-${instanceId}`,
             })
           : undefined;
+      const providerSpawner = cloudTransport?.spawner ?? spawner;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(
           makeCodexMaintenanceResolver(homeLayout.sharedHomePath),
@@ -207,7 +208,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // below.
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
-        ...(cloudTransport ? { childProcessSpawner: cloudTransport.spawner } : {}),
+        ...(cloudTransport
+          ? {
+              childProcessSpawner: cloudTransport.spawner,
+              remoteCwdFor: cloudTransport.remoteCwdFor,
+            }
+          : {}),
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
@@ -229,7 +235,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             { concurrent: true },
           ),
         ),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
       );
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
@@ -270,7 +276,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         effectiveConfig,
         processEnv,
         snapshot.getSnapshot.pipe(Effect.map((value) => value.models)),
-      );
+      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner));
       const snapshotForCwd = (cwd: string) =>
         !effectiveConfig.enabled
           ? snapshot.getSnapshot
@@ -285,7 +291,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               }).pipe(
                 Effect.scoped,
                 Effect.timeout("20 seconds"),
-                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
               ),
             ]).pipe(
               Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),

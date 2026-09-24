@@ -170,13 +170,14 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
         defaultCwd: serverConfig.cwd,
         ...(cloudTransport ? { ptyAdapter: makeCloudPtyAdapter(cloudTransport.spawnNode) } : {}),
       });
+      const providerSpawner = cloudTransport?.spawner ?? childProcessSpawner;
       const checkProvider = checkFreebuffProviderStatus(
         effectiveConfig,
         processEnvironment,
         serverConfig.cwd,
       ).pipe(
         Effect.map(stampIdentity),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
       );
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<FreebuffSettings>>(

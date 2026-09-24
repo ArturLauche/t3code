@@ -1,4 +1,4 @@
-import { CloudRuntimeConfigMap } from "./cloudRuntime.ts";
+import { CloudRuntimeConfigMap, CloudRuntimeConfigMapPatch } from "./cloudRuntime.ts";
 import { SshDeviceHostConfigs } from "./device.ts";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
@@ -38,6 +38,7 @@ import {
 } from "./preview.ts";
 import {
   ProviderInstanceConfig,
+  ProviderInstanceConfigMapPatch,
   ProviderInstanceId,
   type ProviderDriverKind,
 } from "./providerInstance.ts";
@@ -1594,12 +1595,13 @@ export const ServerSettingsPatch = Schema.Struct({
       antigravity: Schema.optionalKey(AntigravitySettingsPatch),
     }),
   ),
-  // Whole-map replacement for the new instance config. Patching individual
-  // entries is intentionally out of scope: the map is small, and partial
-  // patches risk leaving driver-specific config in a half-merged state.
-  // The web UI sends a fully-formed map every time it edits this field.
-  providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
-  cloudRuntimeInstances: Schema.optionalKey(CloudRuntimeConfigMap),
+  // Whole-map replacement for the new instance config. Entries may omit
+  // executionTarget for compatibility with older clients; the server preserves
+  // the existing target unless the patch explicitly sends null.
+  providerInstances: Schema.optionalKey(ProviderInstanceConfigMapPatch),
+  // Per-entry cloud runtime patches avoid overwriting another client's edit;
+  // `null` removes one runtime while omitted entries remain unchanged.
+  cloudRuntimeInstances: Schema.optionalKey(CloudRuntimeConfigMapPatch),
   // Per-entry, unlike `providerInstances`: a client only ever adds or removes
   // one source, and sending the whole map races another edit that has not
   // echoed back yet. `null` removes; the server merges into its current map.
