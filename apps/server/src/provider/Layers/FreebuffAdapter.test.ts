@@ -429,7 +429,7 @@ describe("FreebuffAdapter", () => {
           enabled: true,
           binaryPath: "/opt/freebuff",
           configDir: "/tmp/freebuff-test",
-          launchArgs: "--trust-agents --some-option",
+          launchArgs: "--trust-agents --trust-agents --some-option",
         }),
         configDir: "/tmp/freebuff-test",
         environment: {},

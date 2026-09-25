@@ -119,6 +119,7 @@ interface FreebuffSessionContext {
   readonly turns: Array<FreebuffThreadTurn>;
   readonly activeTurn: Ref.Ref<ActiveTerminalTurn | undefined>;
   readonly lastScreen: Ref.Ref<string>;
+  readonly renderedScreen: () => string;
   monitorFiber?: Fiber.Fiber<void, never>;
   readonly disposeTransport: () => void;
   stopping: boolean;
@@ -164,7 +165,7 @@ const BLOCKED_SCREEN_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
     "Another Freebuff process is already using this account. Stop it before starting this thread.",
   ],
   [
-    /^\s*only\s+one\s+freebuff\s+instance\s+is\s+allowed\s*$/iu,
+    /^\s*only\s+one\s+freebuff\s+instance\s+is\s+allowed(?:\s+at\s+a\s+time)?\.?\s*$/iu,
     "Another Freebuff process is already using this account. Stop it before starting this thread.",
   ],
   [
@@ -918,7 +919,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
   const processScreenEvent = (context: FreebuffSessionContext, screen: string) =>
     Effect.gen(function* () {
       if (context.stopped) return;
-      const renderedScreen = terminalText(context.terminal);
+      const renderedScreen = context.renderedScreen();
       const rawScreenState = classifyFreebuffScreen(screenTail(screen));
       const currentScreen = renderedScreen.length > 0 ? renderedScreen : screen;
       const now = yield* Clock.currentTimeMillis;
@@ -990,7 +991,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
       if (context.stopped) return;
       const active = yield* Ref.get(context.activeTurn);
       if (!active) return;
-      const renderedScreen = terminalText(context.terminal);
+      const renderedScreen = context.renderedScreen();
       if (renderedScreen.length > 0) active.latestScreen = renderedScreen;
       const now = yield* Clock.currentTimeMillis;
       if (now >= active.deadlineAt) {
@@ -1152,13 +1153,10 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         const cwd = startInput.cwd?.trim() || input.defaultCwd;
         const sessionScope = yield* Scope.make("sequential");
         yield* Scope.addFinalizer(adapterScope, Scope.close(sessionScope, Exit.void));
-        const launchArgs = [...tokenizeCliArgs(input.settings.launchArgs)];
-        const trustAgentsIndex = launchArgs.indexOf("--trust-agents");
-        if (input.settings.trustRepositoryAgents) {
-          if (trustAgentsIndex < 0) launchArgs.push("--trust-agents");
-        } else if (trustAgentsIndex >= 0) {
-          launchArgs.splice(trustAgentsIndex, 1);
-        }
+        const launchArgs = tokenizeCliArgs(input.settings.launchArgs).filter(
+          (argument) => argument !== "--trust-agents",
+        );
+        if (input.settings.trustRepositoryAgents) launchArgs.push("--trust-agents");
         launchArgs.push("--cwd", cwd);
         const processEnvironment: NodeJS.ProcessEnv = {
           ...input.environment,
@@ -1228,14 +1226,16 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           rows: TERMINAL_ROWS,
           scrollback: TERMINAL_SCROLLBACK,
         });
+        let renderedScreen = "";
         const removeDataListener = process.onData((data) => {
           terminal.write(data);
           enqueueProcessEvent(processState, wakeQueue, { type: "screen", value: data });
         });
         const parsedListener = terminal.onWriteParsed(() => {
+          renderedScreen = terminalText(terminal);
           enqueueProcessEvent(processState, wakeQueue, {
             type: "screen",
-            value: terminalText(terminal),
+            value: renderedScreen,
           });
         });
         const removeExitListener = process.onExit((event) => {
@@ -1269,6 +1269,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           turns: [],
           activeTurn,
           lastScreen,
+          renderedScreen: () => renderedScreen,
           disposeTransport,
           stopping: false,
           stopped: false,
