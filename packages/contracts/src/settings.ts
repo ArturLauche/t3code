@@ -750,6 +750,49 @@ export const GrokSettings = makeProviderSettingsSchema(
 );
 export type GrokSettings = typeof GrokSettings.Type;
 
+/**
+ * Cline is driven over ACP (`cline --acp`). Credentials are never stored here:
+ * the CLI's own `cline auth` state (or `CLINE_API_KEY`) is the single source of
+ * truth, so T3 never mints a second Cline identity. `dataDir` only relocates
+ * the CLI's state, which is how a second instance points at its own profile.
+ */
+export const ClineSettings = makeProviderSettingsSchema(
+  {
+    // Off by default (like Grok and OpenCode): spawning a Cline ACP process on
+    // every install is a real cost. Users opt in from Settings.
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("cline").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the Cline CLI binary.",
+        providerSettingsForm: { placeholder: "cline", clearWhenEmpty: "omit" },
+      }),
+    ),
+    dataDir: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Cline data directory",
+        description:
+          "Optional Cline data directory. Leave empty to use the CLI's default profile from the instance environment.",
+        providerSettingsForm: { placeholder: "Automatic", clearWhenEmpty: "persist" },
+      }),
+    ),
+    // Present only so the shared settings machinery type-checks. Cline's model
+    // catalog is advertised by the ACP session and cannot be hand-authored.
+    customModels: Schema.Array(CustomModelSetting).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["binaryPath", "dataDir"],
+  },
+);
+export type ClineSettings = typeof ClineSettings.Type;
+
 export const FreebuffSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -1314,6 +1357,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    cline: ClineSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     freebuff: FreebuffSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     antigravity: AntigravitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
@@ -1473,6 +1517,13 @@ const GrokSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
 });
 
+const ClineSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(TrimmedString),
+  dataDir: Schema.optionalKey(TrimmedString),
+  customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
+});
+
 const FreebuffSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
@@ -1600,6 +1651,7 @@ export const ServerSettingsPatch = Schema.Struct({
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
+      cline: Schema.optionalKey(ClineSettingsPatch),
       freebuff: Schema.optionalKey(FreebuffSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
       antigravity: Schema.optionalKey(AntigravitySettingsPatch),

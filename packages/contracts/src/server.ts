@@ -23,6 +23,7 @@ import {
 } from "./keybindings.ts";
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
+import { RuntimeMode } from "./orchestration.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderUsageLimits, UsageLimitSourceSnapshots } from "./providerUsageLimits.ts";
 import { ServerSettings } from "./settings.ts";
@@ -214,6 +215,17 @@ export const ServerProvider = Schema.Struct({
   badgeLabel: Schema.optional(TrimmedNonEmptyString),
   continuation: Schema.optional(ServerProviderContinuation),
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
+  // Access modes the agent can actually enforce. Absent means "every mode",
+  // which is true of every provider that has not declared a narrower set.
+  // Clients must gate the access-mode picker and refuse to send on a mode the
+  // provider cannot honor rather than silently widening the grant.
+  supportedRuntimeModes: Schema.optional(Schema.Array(RuntimeMode)),
+  // Whether the agent consumes image content blocks sent in a prompt. Absent
+  // means true. Some agents advertise image prompt support in their ACP
+  // capabilities and then drop every non-text block before dispatch, so a
+  // client that trusts the ACP flag would let a user attach an image that is
+  // discarded without a trace.
+  supportsImageAttachments: Schema.optional(Schema.Boolean),
   // The driver streams context window usage, so a started thread will have a
   // meter once its activities load. Clients reserve the meter's space on it.
   reportsContextWindow: Schema.optional(Schema.Boolean),
