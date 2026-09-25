@@ -174,9 +174,14 @@ describe("Freebuff screen classification", () => {
       "busy",
     );
     expect(
+      classifyFreebuffScreen(
+        "Freebuff is already running\nTake over\nEnter a coding task or / for commands",
+      ).kind,
+    ).toBe("blocked");
+    expect(
       classifyFreebuffScreen("Freebuff is already running\nEnter a coding task or / for commands")
         .kind,
-    ).toBe("blocked");
+    ).toBe("chat");
     expect(
       classifyFreebuffScreen(
         `Start coding for free\n${Array.from({ length: 130 }, () => "historical output").join("\n")}\nEnter a coding task or / for commands`,

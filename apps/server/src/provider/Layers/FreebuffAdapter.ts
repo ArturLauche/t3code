@@ -213,6 +213,8 @@ const BUSY_SCREEN_LINE =
 const HIGH_DEMAND_SCREEN_LINE =
   /^high\s+demand\s+[—-]\s+in\s+line,\s+starting\s+soon(?:\.{3}|…)?$/iu;
 const CHAT_GATE_LINE = /^\s*enter\s+a\s+coding\s+task(?:\s+or\s+\/\s+for\s+commands)?\b/iu;
+const OVERLAY_MARKER_LINE =
+  /^\s*(?:take\s+over|exit|load\s+and\s+run\s+these\?|close\s+the\s+other\s+instance)\b/iu;
 
 const hasFreebuffChatGate = (screen: string): boolean =>
   screenTail(screen)
@@ -246,8 +248,12 @@ export function classifyFreebuffScreen(rawScreen: string): FreebuffScreenState {
         "Freebuff is not authenticated for this provider instance. Sign in from a terminal with the same Freebuff configuration, then retry.",
     };
   }
+  const hasOverlayMarker = currentRegionLines.some((line) => OVERLAY_MARKER_LINE.test(line));
   for (const [pattern, detail] of BLOCKED_SCREEN_PATTERNS) {
-    if (currentRegionLines.some((line) => pattern.test(line))) {
+    if (
+      currentRegionLines.some((line) => pattern.test(line)) &&
+      (lastChatGate < 0 || hasOverlayMarker)
+    ) {
       return { kind: "blocked", detail };
     }
   }
