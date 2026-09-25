@@ -246,6 +246,38 @@ const makeReconcile = <R>(input: {
       const nextKeys = new Set<ProviderInstanceId>(
         nextRaw.map(([raw]) => ProviderInstanceId.make(raw)),
       );
+      const singleInstanceCandidates = new Map<
+        ProviderDriverKind,
+        Array<{ readonly instanceId: ProviderInstanceId; readonly enabled: boolean }>
+      >();
+      const blockedMultipleInstanceIds = new Set<ProviderInstanceId>();
+      for (const [rawInstanceId, entry] of nextRaw) {
+        const driver = driversById.get(entry.driver);
+        if (driver?.metadata.supportsMultipleInstances !== false) continue;
+        const candidates = singleInstanceCandidates.get(entry.driver) ?? [];
+        const configEnabled = providerInstanceConfigEnabledFlag(entry.config);
+        candidates.push({
+          instanceId: ProviderInstanceId.make(rawInstanceId),
+          enabled:
+            entry.enabled !== false &&
+            configEnabled !== false &&
+            (entry.enabled === true || configEnabled === true),
+        });
+        singleInstanceCandidates.set(entry.driver, candidates);
+      }
+      for (const [driver, candidates] of singleInstanceCandidates) {
+        const kept = candidates.find((candidate) => candidate.enabled) ?? candidates[0];
+        if (!kept) continue;
+        for (const candidate of candidates) {
+          if (candidate.instanceId === kept.instanceId) continue;
+          blockedMultipleInstanceIds.add(candidate.instanceId);
+          yield* Effect.logWarning("Provider driver does not support multiple instances", {
+            driver,
+            instanceId: candidate.instanceId,
+            keptInstanceId: kept.instanceId,
+          });
+        }
+      }
 
       // 1. Close scopes for instances that disappeared or whose config
       //    changed. Do this BEFORE creating replacements so ids map 1-to-1
@@ -255,6 +287,10 @@ const makeReconcile = <R>(input: {
       for (const [instanceId, live] of previousEntries) {
         if (!nextKeys.has(instanceId)) {
           removedIds.push(instanceId);
+          continue;
+        }
+        if (blockedMultipleInstanceIds.has(instanceId)) {
+          replacedIds.add(instanceId);
           continue;
         }
         const nextEntry = configMap[instanceId];
@@ -279,7 +315,20 @@ const makeReconcile = <R>(input: {
 
       for (const [rawInstanceId, entry] of nextRaw) {
         const instanceId = ProviderInstanceId.make(rawInstanceId);
-        nextOrder.push(instanceId);
+
+        if (blockedMultipleInstanceIds.has(instanceId)) {
+          builtUnavailable.set(
+            instanceId,
+            yield* buildUnavailableProviderSnapshot({
+              driverKind: entry.driver,
+              instanceId,
+              displayName: entry.displayName,
+              accentColor: entry.accentColor,
+              reason: `Driver '${entry.driver}' supports only one configured instance.`,
+            }),
+          );
+          continue;
+        }
 
         const existing = previousEntries.get(instanceId);
         if (existing !== undefined && !replacedIds.has(instanceId)) {
@@ -301,6 +350,8 @@ const makeReconcile = <R>(input: {
           builtUnavailable.set(instanceId, result.snapshot);
         }
       }
+
+      nextOrder.push(...builtEntries.keys());
 
       if (previousOrder.length === nextOrder.length) {
         for (let i = 0; i < previousOrder.length; i++) {

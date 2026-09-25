@@ -76,7 +76,7 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     icon: FreebuffIcon,
     badgeLabel: "Experimental",
     settingsSchema: FreebuffSettings,
-    supportsCloudExecution: true,
+    supportsCloudExecution: false,
   },
   {
     value: ProviderDriverKind.make("grok"),

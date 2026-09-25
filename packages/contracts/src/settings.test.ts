@@ -8,6 +8,7 @@ import {
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
+  FreebuffSettings,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
@@ -20,6 +21,7 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+const decodeFreebuffSettings = Schema.decodeUnknownSync(FreebuffSettings);
 const decodeCloudRuntimeConfig = Schema.decodeUnknownSync(CloudRuntimeConfig);
 const decodeCloudRuntimeId = Schema.decodeUnknownSync(CloudRuntimeId);
 
@@ -895,6 +897,16 @@ describe("ServerSettingsPatch.providerInstances", () => {
     });
     const ollamaId = ProviderInstanceId.make("ollama_local");
     expect(patch.providerInstances?.[ollamaId]?.driver).toBe("ollama");
+  });
+});
+
+describe("Freebuff settings", () => {
+  it("keeps repository agent trust opt-in", () => {
+    expect(decodeFreebuffSettings({}).trustRepositoryAgents).toBe(false);
+    expect(
+      decodeServerSettingsPatch({ providers: { freebuff: { trustRepositoryAgents: true } } })
+        .providers?.freebuff?.trustRepositoryAgents,
+    ).toBe(true);
   });
 });
 

@@ -319,6 +319,76 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.live("shadows extra instances for a single-instance driver", () =>
+    Effect.gen(function* () {
+      const firstId = ProviderInstanceId.make("freebuff_primary");
+      const extraId = ProviderInstanceId.make("freebuff_extra");
+      const driver = ProviderDriverKind.make("freebuff");
+      const { registry } = yield* makeProviderInstanceRegistry({
+        drivers: [FreebuffDriver],
+        configMap: {
+          [firstId]: {
+            driver,
+            displayName: "Freebuff",
+            enabled: false,
+            config: { enabled: false },
+          },
+          [extraId]: {
+            driver,
+            displayName: "Freebuff extra",
+            enabled: false,
+            config: { enabled: false },
+          },
+        },
+      });
+
+      expect((yield* registry.listInstances).map((instance) => instance.instanceId)).toEqual([
+        firstId,
+      ]);
+      const unavailable = yield* registry.listUnavailable;
+      expect(unavailable).toHaveLength(1);
+      expect(unavailable[0]?.instanceId).toBe(extraId);
+      expect(unavailable[0]?.unavailableReason).toMatch(/only one configured instance/);
+    }).pipe(
+      Effect.provideService(PtyAdapter.PtyAdapter, TestPtyAdapterService),
+      Effect.provide(testLayer),
+    ),
+  );
+
+  it.live("prefers an enabled instance when a single-instance driver has a disabled shadow", () =>
+    Effect.gen(function* () {
+      const disabledId = ProviderInstanceId.make("freebuff_disabled_first");
+      const enabledId = ProviderInstanceId.make("freebuff_enabled_second");
+      const driver = ProviderDriverKind.make("freebuff");
+      const { registry } = yield* makeProviderInstanceRegistry({
+        drivers: [FreebuffDriver],
+        configMap: {
+          [disabledId]: {
+            driver,
+            displayName: "Freebuff disabled",
+            config: {},
+          },
+          [enabledId]: {
+            driver,
+            displayName: "Freebuff enabled",
+            enabled: true,
+            config: { enabled: true },
+          },
+        },
+      });
+
+      expect((yield* registry.listInstances).map((instance) => instance.instanceId)).toEqual([
+        enabledId,
+      ]);
+      const unavailable = yield* registry.listUnavailable;
+      expect(unavailable).toHaveLength(1);
+      expect(unavailable[0]?.instanceId).toBe(disabledId);
+    }).pipe(
+      Effect.provideService(PtyAdapter.PtyAdapter, TestPtyAdapterService),
+      Effect.provide(testLayer),
+    ),
+  );
+
   it.live("treats an explicit in-config enabled:false as disabling despite the envelope", () =>
     Effect.gen(function* () {
       // Old settings files can carry both flags with conflicting values.
@@ -368,8 +438,9 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(unavailable).toHaveLength(1);
       expect(unavailable[0]?.unavailableReason).toMatch(/does not support cloud execution/);
     }).pipe(
-      Effect.provide(testLayer),
-      Effect.provide(OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer))),
+      Effect.provide(
+        Layer.mergeAll(testLayer, OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer))),
+      ),
     ),
   );
 
