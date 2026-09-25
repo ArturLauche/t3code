@@ -366,8 +366,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
           [disabledId]: {
             driver,
             displayName: "Freebuff disabled",
-            enabled: false,
-            config: { enabled: false },
+            config: {},
           },
           [enabledId]: {
             driver,

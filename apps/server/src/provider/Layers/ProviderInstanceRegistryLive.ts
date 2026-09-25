@@ -255,10 +255,13 @@ const makeReconcile = <R>(input: {
         const driver = driversById.get(entry.driver);
         if (driver?.metadata.supportsMultipleInstances !== false) continue;
         const candidates = singleInstanceCandidates.get(entry.driver) ?? [];
+        const configEnabled = providerInstanceConfigEnabledFlag(entry.config);
         candidates.push({
           instanceId: ProviderInstanceId.make(rawInstanceId),
           enabled:
-            entry.enabled !== false && providerInstanceConfigEnabledFlag(entry.config) !== false,
+            entry.enabled !== false &&
+            configEnabled !== false &&
+            (entry.enabled === true || configEnabled === true),
         });
         singleInstanceCandidates.set(entry.driver, candidates);
       }

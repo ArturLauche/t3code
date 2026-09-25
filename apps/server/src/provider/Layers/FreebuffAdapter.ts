@@ -59,6 +59,7 @@ const PROCESS_STOP_GRACE_MS = 2_000;
 const TERMINAL_COLUMNS = 160;
 const TERMINAL_ROWS = 48;
 const TERMINAL_SCROLLBACK = 10_000;
+const TERMINAL_TEXT_LINES = 4_000;
 const MAX_VISIBLE_TEXT_LENGTH = 200_000;
 const MAX_RETAINED_TURNS = 100;
 const CLASSIFICATION_SCREEN_LINES = 120;
@@ -131,7 +132,8 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const terminalText = (terminal: XtermTerminal): string => {
   const buffer = terminal.buffer.active;
   const lines: Array<string> = [];
-  for (let index = 0; index < buffer.length; index += 1) {
+  const start = Math.max(0, buffer.length - TERMINAL_TEXT_LINES);
+  for (let index = start; index < buffer.length; index += 1) {
     lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
   }
   return lines.join("\n").trimEnd();
@@ -212,6 +214,12 @@ const HIGH_DEMAND_SCREEN_LINE =
   /^high\s+demand\s+[—-]\s+in\s+line,\s+starting\s+soon(?:\.{3}|…)?$/iu;
 const CHAT_GATE_LINE = /^\s*enter\s+a\s+coding\s+task(?:\s+or\s+\/\s+for\s+commands)?\b/iu;
 
+const hasFreebuffChatGate = (screen: string): boolean =>
+  screenTail(screen)
+    .split("\n")
+    .map(stripTerminalBorder)
+    .some((line) => CHAT_GATE_LINE.test(line));
+
 export function classifyFreebuffScreen(rawScreen: string): FreebuffScreenState {
   const screen = screenTail(rawScreen);
   const lines = screen.split("\n").map(stripTerminalBorder);
@@ -227,8 +235,9 @@ export function classifyFreebuffScreen(rawScreen: string): FreebuffScreenState {
   const currentRegionLines = lines.slice(regionStart);
   const currentRegion = currentRegionLines.join("\n");
   if (
+    lastChatGate < 0 &&
     currentRegionLines.some((line) =>
-      AUTHENTICATION_SCREEN_PATTERNS.some((pattern) => pattern.test(line)),
+      AUTHENTICATION_SCREEN_PATTERNS.some((linePattern) => linePattern.test(line)),
     )
   ) {
     return {
@@ -811,11 +820,11 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
   // concurrent callers always observe the same terminal outcome.
   const claimAndStopSession = (context: FreebuffSessionContext, reason: string) =>
     claimSessionForStop(context).pipe(
-      Effect.flatMap((claimed) =>
-        claimed
-          ? stopSessionAndPublishResult(context, reason)
-          : Deferred.await(context.stopDeferred),
-      ),
+      Effect.flatMap((claimed) => {
+        if (claimed) return stopSessionAndPublishResult(context, reason);
+        if (sessions.get(context.threadId) !== context) return Effect.void;
+        return Deferred.await(context.stopDeferred);
+      }),
       Effect.uninterruptible,
     );
 
@@ -894,6 +903,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
   const handleUnexpectedExit = (context: FreebuffSessionContext, event: PtyAdapter.PtyExitEvent) =>
     Effect.gen(function* () {
       if (context.stopped) return;
+      yield* Deferred.succeed(context.stopDeferred, undefined).pipe(Effect.ignore);
       context.processState.exited = true;
       const reason =
         event.signal === null
@@ -940,7 +950,10 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         rawScreenState.kind === "unknown"
           ? classifyFreebuffScreen(screenTail(currentScreen))
           : rawScreenState;
-      if (screenState.kind === "authentication" || screenState.kind === "blocked") {
+      if (
+        (screenState.kind === "authentication" || screenState.kind === "blocked") &&
+        (!active?.submitted || !hasFreebuffChatGate(currentScreen))
+      ) {
         if (active) {
           return yield* failTurnOnScreenGate(context, screenState.detail);
         }
@@ -1002,7 +1015,10 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         );
       }
       const screenState = classifyFreebuffScreen(screenTail(active.latestScreen));
-      if (screenState.kind === "authentication" || screenState.kind === "blocked") {
+      if (
+        (screenState.kind === "authentication" || screenState.kind === "blocked") &&
+        (!active.submitted || !hasFreebuffChatGate(active.latestScreen))
+      ) {
         return yield* failTurnOnScreenGate(context, screenState.detail);
       }
       if (active.abortRequested) {
@@ -1057,6 +1073,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         yield* finishTurn(context, "failed", detail, processError(context.threadId, detail, cause));
         const termination = yield* terminateProcess(context).pipe(Effect.result);
         if (Result.isFailure(termination)) {
+          yield* Deferred.fail(context.stopDeferred, termination.failure).pipe(Effect.ignore);
           context.stopping = false;
           context.session = {
             ...context.session,
@@ -1072,6 +1089,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           yield* Effect.logWarning("Freebuff terminal monitor stopped.", { cause });
           return;
         }
+        yield* Deferred.succeed(context.stopDeferred, undefined).pipe(Effect.ignore);
         sessions.delete(context.threadId);
         context.disposeTransport();
         context.session = { ...context.session, status: "error", updatedAt: yield* nowIso };

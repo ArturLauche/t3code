@@ -188,6 +188,9 @@ describe("Freebuff screen classification", () => {
       ).kind,
     ).toBe("chat");
     expect(
+      classifyFreebuffScreen("login required\nEnter a coding task or / for commands").kind,
+    ).toBe("chat");
+    expect(
       classifyFreebuffScreen(
         "> fix the login required redirect\nEnter a coding task or / for commands",
       ).kind,
