@@ -10,6 +10,16 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("call list_thread_pull_requests and link any PR");
   });
 
+  it("omits unavailable MCP tooling instructions for terminal-only providers", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Freebuff",
+      supportsMcpTooling: false,
+    });
+    expect(instructions).toContain("through the Freebuff harness");
+    expect(instructions).not.toContain("t3-code MCP server");
+    expect(instructions).not.toContain("link_pull_request");
+  });
+
   it("keeps known model and effort metadata on one line", () => {
     expect(
       buildRuntimeInstructions({

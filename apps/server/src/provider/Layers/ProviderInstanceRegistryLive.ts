@@ -246,6 +246,24 @@ const makeReconcile = <R>(input: {
       const nextKeys = new Set<ProviderInstanceId>(
         nextRaw.map(([raw]) => ProviderInstanceId.make(raw)),
       );
+      const firstInstanceByDriver = new Map<ProviderDriverKind, ProviderInstanceId>();
+      const blockedMultipleInstanceIds = new Set<ProviderInstanceId>();
+      for (const [rawInstanceId, entry] of nextRaw) {
+        const driver = driversById.get(entry.driver);
+        if (driver?.metadata.supportsMultipleInstances !== false) continue;
+        const instanceId = ProviderInstanceId.make(rawInstanceId);
+        const firstInstanceId = firstInstanceByDriver.get(entry.driver);
+        if (firstInstanceId === undefined) {
+          firstInstanceByDriver.set(entry.driver, instanceId);
+          continue;
+        }
+        blockedMultipleInstanceIds.add(instanceId);
+        yield* Effect.logWarning("Provider driver does not support multiple instances", {
+          driver: entry.driver,
+          instanceId,
+          keptInstanceId: firstInstanceId,
+        });
+      }
 
       // 1. Close scopes for instances that disappeared or whose config
       //    changed. Do this BEFORE creating replacements so ids map 1-to-1
@@ -255,6 +273,10 @@ const makeReconcile = <R>(input: {
       for (const [instanceId, live] of previousEntries) {
         if (!nextKeys.has(instanceId)) {
           removedIds.push(instanceId);
+          continue;
+        }
+        if (blockedMultipleInstanceIds.has(instanceId)) {
+          replacedIds.add(instanceId);
           continue;
         }
         const nextEntry = configMap[instanceId];
@@ -279,7 +301,20 @@ const makeReconcile = <R>(input: {
 
       for (const [rawInstanceId, entry] of nextRaw) {
         const instanceId = ProviderInstanceId.make(rawInstanceId);
-        nextOrder.push(instanceId);
+
+        if (blockedMultipleInstanceIds.has(instanceId)) {
+          builtUnavailable.set(
+            instanceId,
+            yield* buildUnavailableProviderSnapshot({
+              driverKind: entry.driver,
+              instanceId,
+              displayName: entry.displayName,
+              accentColor: entry.accentColor,
+              reason: `Driver '${entry.driver}' supports only one configured instance.`,
+            }),
+          );
+          continue;
+        }
 
         const existing = previousEntries.get(instanceId);
         if (existing !== undefined && !replacedIds.has(instanceId)) {
@@ -301,6 +336,8 @@ const makeReconcile = <R>(input: {
           builtUnavailable.set(instanceId, result.snapshot);
         }
       }
+
+      nextOrder.push(...builtEntries.keys());
 
       if (previousOrder.length === nextOrder.length) {
         for (let i = 0; i < previousOrder.length; i++) {

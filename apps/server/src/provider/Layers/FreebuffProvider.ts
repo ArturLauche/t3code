@@ -46,7 +46,7 @@ const FREEBUFF_PRESENTATION = {
   requiresNewThreadForModelChange: true,
 } as const;
 
-const VERSION_PROBE_TIMEOUT_MS = 4_000;
+const VERSION_PROBE_TIMEOUT_MS = 15_000;
 
 const probeFreebuffVersion = (
   settings: FreebuffSettings,
@@ -103,6 +103,7 @@ export const checkFreebuffProviderStatus = Effect.fn("checkFreebuffProviderStatu
   settings: FreebuffSettings,
   environment: NodeJS.ProcessEnv,
   cwd: string,
+  isAuthenticated: boolean,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   if (!settings.enabled) {
@@ -180,14 +181,23 @@ export const checkFreebuffProviderStatus = Effect.fn("checkFreebuffProviderStatu
       checkedAt,
       models: FREEBUFF_MODELS,
       probe: healthy
-        ? {
-            installed: true,
-            version,
-            status: "ready",
-            auth: { status: "unknown" },
-            message:
-              "Freebuff is available through T3 Code's experimental terminal bridge. Sign in once from a Freebuff terminal before starting a thread.",
-          }
+        ? isAuthenticated
+          ? {
+              installed: true,
+              version,
+              status: "ready",
+              auth: { status: "authenticated", label: "Freebuff account" },
+              message:
+                "Freebuff is installed and signed in. T3 Code uses the model selected by Freebuff when a thread starts.",
+            }
+          : {
+              installed: true,
+              version,
+              status: "error",
+              auth: { status: "unauthenticated" },
+              message:
+                "Freebuff is installed, but this provider instance is not signed in. Open a terminal with this provider instance and run `freebuff login`, then retry.",
+            }
         : {
             installed: true,
             version,

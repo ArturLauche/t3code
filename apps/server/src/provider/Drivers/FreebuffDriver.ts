@@ -10,11 +10,6 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts";
-import {
-  makeCloudExecutionSpawner,
-  makeCloudPtyAdapter,
-} from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import type * as TextGeneration from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeFreebuffAdapter } from "../Layers/FreebuffAdapter.ts";
@@ -44,6 +39,19 @@ const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
   provider: FREEBUFF_PROVIDER,
   packageName: null,
 });
+
+export const freebuffCredentialsHaveToken = (raw: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+    const profile = (parsed as Record<string, unknown>).default;
+    if (typeof profile !== "object" || profile === null || Array.isArray(profile)) return false;
+    const authToken = (profile as Record<string, unknown>).authToken;
+    return typeof authToken === "string" && authToken.trim().length > 0;
+  } catch {
+    return false;
+  }
+};
 
 type UnsupportedTextGenerationOperation =
   | "generateCommitMessage"
@@ -79,25 +87,16 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
   driverKind: FREEBUFF_PROVIDER,
   metadata: {
     displayName: "Freebuff",
-    supportsMultipleInstances: true,
-    supportsCloudExecution: true,
+    supportsMultipleInstances: false,
+    supportsCloudExecution: false,
   },
   configSchema: FreebuffSettings,
   defaultConfig: (): FreebuffSettings => decodeFreebuffSettings({}),
-  create: ({
-    instanceId,
-    displayName,
-    accentColor,
-    environment,
-    executionTarget,
-    enabled,
-    config,
-  }) =>
+  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const cloudRuntime = yield* CloudRuntimeService;
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const effectiveConfig = {
@@ -150,34 +149,35 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
         ...mergeProviderInstanceEnvironment(environment),
         FREEBUFF_CONFIG_DIR: configDir,
       };
-      const cloudTransport =
-        executionTarget?.enabled === true
-          ? yield* makeCloudExecutionSpawner({
-              cloud: cloudRuntime,
-              localSpawner: childProcessSpawner,
-              runtimeId: executionTarget.runtimeId,
-              instanceId,
-              environment: processEnvironment,
-              providerEnvironment: environment,
-              sandboxPrefix: `t3-freebuff-${instanceId}`,
-            })
-          : undefined;
+      const readIsAuthenticated = Effect.gen(function* () {
+        const hasCredentialsFile = yield* fileSystem
+          .readFileString(path.join(configDir, "credentials.json"))
+          .pipe(
+            Effect.map(freebuffCredentialsHaveToken),
+            Effect.orElseSucceed(() => false),
+          );
+        return hasCredentialsFile || Boolean(processEnvironment.CODEBUFF_API_KEY?.trim());
+      });
+      // The server provides the live PTY service at the provider-instance
+      // hydration boundary; Freebuff intentionally has no cloud PTY transport.
       const adapter = yield* makeFreebuffAdapter({
         settings: effectiveConfig,
         configDir,
         environment: processEnvironment,
         instanceId,
         defaultCwd: serverConfig.cwd,
-        ...(cloudTransport ? { ptyAdapter: makeCloudPtyAdapter(cloudTransport.spawnNode) } : {}),
       });
-      const providerSpawner = cloudTransport?.spawner ?? childProcessSpawner;
-      const checkProvider = checkFreebuffProviderStatus(
-        effectiveConfig,
-        processEnvironment,
-        serverConfig.cwd,
-      ).pipe(
+      const checkProvider = Effect.gen(function* () {
+        const isAuthenticated = yield* readIsAuthenticated;
+        return yield* checkFreebuffProviderStatus(
+          effectiveConfig,
+          processEnvironment,
+          serverConfig.cwd,
+          isAuthenticated,
+        );
+      }).pipe(
         Effect.map(stampIdentity),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
       );
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<FreebuffSettings>>(

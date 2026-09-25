@@ -20,6 +20,24 @@ describe("ProviderSettingsForm helpers", () => {
     ]);
   });
 
+  it("exposes Freebuff as a local terminal provider with explicit agent trust", () => {
+    const freebuff = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("freebuff")];
+    expect(freebuff).toBeDefined();
+    expect(freebuff?.supportsCloudExecution).toBe(false);
+
+    const fields = deriveProviderSettingsFields(freebuff!);
+    expect(fields.map((field) => field.key)).toEqual([
+      "binaryPath",
+      "configDir",
+      "launchArgs",
+      "trustRepositoryAgents",
+    ]);
+    expect(fields.find((field) => field.key === "trustRepositoryAgents")).toMatchObject({
+      control: "switch",
+      defaultBooleanValue: false,
+    });
+  });
+
   it("sources labels and descriptions from schema annotations", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

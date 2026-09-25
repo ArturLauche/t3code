@@ -777,7 +777,16 @@ export const FreebuffSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Launch arguments",
         description: "Additional arguments passed to the official Freebuff CLI.",
-        providerSettingsForm: { placeholder: "--trust-agents", clearWhenEmpty: "persist" },
+        providerSettingsForm: { placeholder: "None", clearWhenEmpty: "persist" },
+      }),
+    ),
+    trustRepositoryAgents: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Trust repository agent files",
+        description:
+          "Allow Freebuff to load executable .agents and mcp.json files from the project without prompting.",
+        providerSettingsForm: { control: "switch" },
       }),
     ),
     customModels: Schema.Array(CustomModelSetting).pipe(
@@ -786,7 +795,7 @@ export const FreebuffSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "configDir", "launchArgs"],
+    order: ["binaryPath", "configDir", "launchArgs", "trustRepositoryAgents"],
   },
 );
 export type FreebuffSettings = typeof FreebuffSettings.Type;
@@ -1469,6 +1478,7 @@ const FreebuffSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   configDir: Schema.optionalKey(TrimmedString),
   launchArgs: Schema.optionalKey(TrimmedString),
+  trustRepositoryAgents: Schema.optionalKey(Schema.Boolean),
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
 });
 
