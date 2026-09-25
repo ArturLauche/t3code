@@ -76,6 +76,46 @@ Ownership is cached per instance and re-read immediately before an update runs. 
 changed since the advisory, and reports success only when the refreshed provider is still installed
 with a readable, current version.
 
+## Cline speaks ACP, and its ACP build is narrower than the CLI
+
+[Cline](https://cline.bot) is integrated over `cline --acp` — newline-delimited JSON-RPC 2.0 on
+stdio. Three properties of that build shape the whole integration, and each is a place a future
+maintainer will otherwise get wrong:
+
+**Authentication is never requested.** Cline's ACP `authenticate` starts a device-code OAuth
+flow: it writes a URL to stderr, tries to open a browser, and then blocks until someone finishes
+it. On a T3 server that browser opens on a machine the user is not sitting at, and the request
+never returns. The runtime therefore leaves `authMethodId` unset for Cline and reads
+authentication out of the session-setup answer instead — Cline fails `session/new` with
+`-32000 Authentication required` when it has no usable credential. That single error is the whole
+auth check, and the classifier is deliberately narrow about it: `-32000` is a generic ACP code, so
+the method and the message wording must both line up before Settings tells a user to run
+`cline auth`. See [Cline ACP support](../../apps/server/src/provider/acp/ClineAcpSupport.ts).
+
+**The model option cannot be found by category.** Cline advertises its provider picker with
+`category: "model"` and lists it _before_ the model picker, so the shared "first model-category
+option" lookup resolves to `provider` and `session/set_config_option` would change the account
+instead of the model. Cline resolves its own option id. The same call rejects a selection outside
+the advertised catalog, because `session/set_model` accepts any string on this build.
+
+**Tool approval has exactly one knob.** Cline exposes a single `auto_approve` boolean: no per-tool
+policies, nothing between "ask about everything" and "approve everything". T3's `Supervised` and
+`Full access` map onto those two states and are the only modes the driver accepts; the two
+in-between modes are declared unsupported on the snapshot rather than silently widened.
+See [Cline provider](../../apps/server/src/provider/Layers/ClineProvider.ts).
+
+Three more limits are declared the same way instead of being discovered at send time. Cline
+advertises `promptCapabilities.image: true` and then discards every non-text block before
+dispatch, so the snapshot reports no image support and the adapter refuses attachments. It binds
+its mode on the _first_ prompt, so a mid-thread switch to Plan would still allow file edits;
+Plan is therefore unsupported and the interaction-mode toggle is hidden. And it hard-disables
+reasoning, so no thinking level is offered.
+
+Cline stores the ACP `mcpServers` field and never loads those servers, so the adapter declares
+`consumesMcpServers: false` and the server does not mint an MCP credential for the session.
+Configure MCP on the Cline side instead. Background text generation is withheld the same way:
+titles, branch names and commit messages go to another provider.
+
 ## Protocol traps
 
 Codex async questions arrive as notifications and are answered with a new user message. There is
