@@ -19,6 +19,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -150,56 +151,56 @@ const screenTail = (screen: string): string =>
   screen.split("\n").slice(-CLASSIFICATION_SCREEN_LINES).join("\n");
 
 const AUTHENTICATION_SCREEN_PATTERNS = [
-  /\bpress\s+enter\s+to\s+login\b/iu,
-  /\bopen\s+this\s+url(?:\s+in\s+your\s+browser)?\s+to\s+login\b/iu,
-  /\bwaiting\s+for\s+login\b/iu,
-  /\b(?:not\s+authenticated|authentication\s+required|login\s+required)\b/iu,
-  /\bfound\s+api\s+key\s+but\s+it\s+(?:appears\s+to\s+be|is)\s+invalid\b/iu,
+  /^\s*press\s+enter\s+to\s+login\s*(?:\.{3}|…)?\s*$/iu,
+  /^\s*open\s+this\s+url(?:\s+in\s+your\s+browser)?\s+to\s+login\s*$/iu,
+  /^\s*waiting\s+for\s+login\s*$/iu,
+  /^\s*(?:not\s+authenticated|authentication\s+required|login\s+required)\s*$/iu,
+  /^\s*found\s+api\s+key\s+but\s+it\s+(?:appears\s+to\s+be|is)\s+invalid\s*$/iu,
 ] as const;
 
 const BLOCKED_SCREEN_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [
-    /freebuff\s+is\s+already\s+running/iu,
+    /^\s*freebuff\s+is\s+already\s+running\s*$/iu,
     "Another Freebuff process is already using this account. Stop it before starting this thread.",
   ],
   [
-    /only\s+one\s+freebuff\s+instance\s+is\s+allowed/iu,
+    /^\s*only\s+one\s+freebuff\s+instance\s+is\s+allowed\s*$/iu,
     "Another Freebuff process is already using this account. Stop it before starting this thread.",
   ],
   [
-    /another\s+freebuff\s+instance\s+took\s+over\s+this\s+account/iu,
+    /^\s*another\s+freebuff\s+instance\s+took\s+over\s+this\s+account\.?\s*$/iu,
     "Another Freebuff instance took over this account. Close the other instance, then retry.",
   ],
   [
-    /only\s+one\s+cli\s+per\s+account\s+can\s+be\s+active\s+at\s+a\s+time/iu,
+    /^\s*only\s+one\s+cli\s+per\s+account\s+can\s+be\s+active\s+at\s+a\s+time\.?\s*$/iu,
     "Another Freebuff instance took over this account. Close the other instance, then retry.",
   ],
   [
-    /freebuff\s+found\s+agent\s+files\s+in\s+this\s+repository\s+it\s+has\s+not\s+run\s+before/iu,
+    /^\s*freebuff\s+found\s+agent\s+files\s+in\s+this\s+repository\s+it\s+has\s+not\s+run\s+before:?\s*$/iu,
     "Freebuff needs approval before loading repository .agents or mcp.json files. Enable 'Trust repository agent files' in Freebuff settings, or trust the repository in Freebuff, then retry.",
   ],
   [
-    /load\s+and\s+run\s+these\?\s*\[y\/N\]/iu,
+    /^\s*load\s+and\s+run\s+these\?\s*\[y\/N\]\s*$/iu,
     "Freebuff needs approval before loading repository .agents or mcp.json files. Enable 'Trust repository agent files' in Freebuff settings, or trust the repository in Freebuff, then retry.",
   ],
   [
-    /free\s+mode\s+isn't\s+available\s+in\s+your\s+region/iu,
+    /^\s*free\s+mode\s+isn't\s+available\s+in\s+your\s+region\.?\s*$/iu,
     "Freebuff is not available from this network location.",
   ],
   [
-    /account\s+unavailable|your\s+account\s+has\s+been\s+suspended/iu,
+    /^\s*(?:account\s+unavailable|your\s+account\s+has\s+been\s+suspended)\.?\s*$/iu,
     "This Freebuff account is unavailable.",
   ],
   [
-    /session\s+limit\s+reached|daily\s+freebuff\s+limit\s+reached/iu,
+    /^\s*(?:session\s+limit\s+reached|daily\s+freebuff\s+limit\s+reached)\.?\s*$/iu,
     "Freebuff's current usage limit has been reached.",
   ],
   [
-    /not\s+enough\s+freebucks|monthly\s+usage\s+limit\s+reached/iu,
+    /^\s*(?:not\s+enough\s+freebucks|monthly\s+usage\s+limit\s+reached)\.?\s*$/iu,
     "This Freebuff account has reached its current usage limit.",
   ],
   [
-    /too\s+many\s+freebuff\s+sessions\s+on\s+this\s+network/iu,
+    /^\s*too\s+many\s+freebuff\s+sessions\s+on\s+this\s+network\.?\s*$/iu,
     "Freebuff's per-network session limit has been reached.",
   ],
 ] as const;
@@ -222,8 +223,13 @@ export function classifyFreebuffScreen(rawScreen: string): FreebuffScreenState {
   }
   const regionStart =
     lastChatGate >= 0 ? Math.max(0, lastChatGate - 2) : Math.max(0, lines.length - 12);
-  const currentRegion = lines.slice(regionStart).join("\n");
-  if (AUTHENTICATION_SCREEN_PATTERNS.some((pattern) => pattern.test(currentRegion))) {
+  const currentRegionLines = lines.slice(regionStart);
+  const currentRegion = currentRegionLines.join("\n");
+  if (
+    currentRegionLines.some((line) =>
+      AUTHENTICATION_SCREEN_PATTERNS.some((pattern) => pattern.test(line)),
+    )
+  ) {
     return {
       kind: "authentication",
       detail:
@@ -231,7 +237,9 @@ export function classifyFreebuffScreen(rawScreen: string): FreebuffScreenState {
     };
   }
   for (const [pattern, detail] of BLOCKED_SCREEN_PATTERNS) {
-    if (pattern.test(currentRegion)) return { kind: "blocked", detail };
+    if (currentRegionLines.some((line) => pattern.test(line))) {
+      return { kind: "blocked", detail };
+    }
   }
   if (currentRegion.split("\n").some((line) => BUSY_SCREEN_LINE.test(line.trim()))) {
     return { kind: "busy" };
@@ -335,9 +343,14 @@ const candidateAssistantLines = (input: {
 
   const lastChatGate = currentLines.findLastIndex((line) => CHAT_GATE_LINE.test(line));
   const searchStart = lastChatGate >= 0 ? lastChatGate + 1 : 0;
-  let promptIndex = findFirstPromptLine(currentLines, needle, searchStart);
-  if (promptIndex < 0 && lastChatGate >= 0) {
+  let promptIndex = -1;
+  if (lastChatGate >= 0) {
     promptIndex = findLastMarkedPromptLine(currentLines, needle, lastChatGate + 1);
+    if (promptIndex < 0) {
+      promptIndex = findFirstPromptLine(currentLines, needle, searchStart);
+    }
+  } else {
+    promptIndex = findFirstPromptLine(currentLines, needle, 0);
   }
   if (promptIndex < 0 && searchStart > 0) {
     promptIndex = findLastMarkedPromptLine(currentLines, needle, currentLines.length);
@@ -360,7 +373,8 @@ const candidateAssistantLines = (input: {
 
 const RUNTIME_INSTRUCTION_BLOCK =
   /<(?:runtime_info|pull_request_linking)>[\s\S]*?(?:<\/(?:runtime_info|pull_request_linking)>|$)/giu;
-const ATTACHMENT_CONTEXT_BLOCK = /\[(?:Attached|Pasted text)[\s\S]*?\]/giu;
+const ATTACHMENT_CONTEXT_BLOCK =
+  /\[(?:Attached (?:file|image|text) |Pasted text )[^\]\n]*\bis saved at:\s[^\]\n]+\]/giu;
 const CAPTURED_WINDOW_CONTEXT_BLOCK =
   /Untrusted captured-window data follows as JSON\.[\s\S]*?End untrusted captured-window data\./giu;
 
@@ -792,6 +806,8 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
       Effect.tapError((error) => Deferred.fail(context.stopDeferred, error)),
     );
 
+  // Once a stop is claimed, keep the claim/result transition uninterruptible so
+  // concurrent callers always observe the same terminal outcome.
   const claimAndStopSession = (context: FreebuffSessionContext, reason: string) =>
     claimSessionForStop(context).pipe(
       Effect.flatMap((claimed) =>
@@ -799,6 +815,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           ? stopSessionAndPublishResult(context, reason)
           : Deferred.await(context.stopDeferred),
       ),
+      Effect.uninterruptible,
     );
 
   const submitActiveTurn = (context: FreebuffSessionContext, active: ActiveTerminalTurn) =>
@@ -828,7 +845,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         ...(yield* eventStamp(context.threadId)),
         type: "turn.started",
         turnId: active.id,
-        payload: {},
+        payload: { model: context.session.model },
       });
       yield* publish({
         ...(yield* eventStamp(context.threadId)),
@@ -903,7 +920,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
       if (context.stopped) return;
       const renderedScreen = terminalText(context.terminal);
       const rawScreenState = classifyFreebuffScreen(screenTail(screen));
-      const currentScreen = rawScreenState.kind === "unknown" ? renderedScreen || screen : screen;
+      const currentScreen = renderedScreen.length > 0 ? renderedScreen : screen;
       const now = yield* Clock.currentTimeMillis;
       const active = yield* Ref.get(context.activeTurn);
       yield* Ref.set(context.lastScreen, currentScreen);
@@ -918,7 +935,10 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         }
       }
 
-      const screenState = classifyFreebuffScreen(screenTail(currentScreen));
+      const screenState =
+        rawScreenState.kind === "unknown"
+          ? classifyFreebuffScreen(screenTail(currentScreen))
+          : rawScreenState;
       if (screenState.kind === "authentication" || screenState.kind === "blocked") {
         if (active) {
           return yield* failTurnOnScreenGate(context, screenState.detail);
@@ -944,12 +964,11 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         );
       }
       if (active?.submitted) {
-        const rendered = terminalText(context.terminal);
         active.output = mergeVisibleAssistantText(
           active.output,
           extractVisibleAssistantText({
             baseline: active.baseline,
-            current: rendered || currentScreen,
+            current: renderedScreen || currentScreen,
             prompt: active.userPrompt,
           }),
         );
@@ -1134,8 +1153,11 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
         const sessionScope = yield* Scope.make("sequential");
         yield* Scope.addFinalizer(adapterScope, Scope.close(sessionScope, Exit.void));
         const launchArgs = [...tokenizeCliArgs(input.settings.launchArgs)];
-        if (input.settings.trustRepositoryAgents && !launchArgs.includes("--trust-agents")) {
-          launchArgs.push("--trust-agents");
+        const trustAgentsIndex = launchArgs.indexOf("--trust-agents");
+        if (input.settings.trustRepositoryAgents) {
+          if (trustAgentsIndex < 0) launchArgs.push("--trust-agents");
+        } else if (trustAgentsIndex >= 0) {
+          launchArgs.splice(trustAgentsIndex, 1);
         }
         launchArgs.push("--cwd", cwd);
         const processEnvironment: NodeJS.ProcessEnv = {
@@ -1397,7 +1419,8 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           return nextActive;
         }),
       );
-      yield* Deferred.await(active.admission).pipe(
+      const admissionResult = yield* Deferred.await(active.admission).pipe(
+        Effect.timeoutOption(ADMISSION_TIMEOUT_MS + TURN_SETTLE_MS),
         Effect.onInterrupt(() =>
           operationLock.withPermits(1)(
             Effect.gen(function* () {
@@ -1415,6 +1438,19 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           ),
         ),
       );
+      if (Option.isNone(admissionResult)) {
+        const error = requestError("Freebuff did not reach its chat screen in time.");
+        yield* operationLock.withPermits(1)(
+          Effect.gen(function* () {
+            const context = sessions.get(turnInput.threadId);
+            if (!context) return;
+            const current = yield* Ref.get(context.activeTurn);
+            if (current?.id !== active.id) return;
+            yield* finishTurn(context, "failed", error.message, error).pipe(Effect.ignore);
+          }),
+        );
+        return yield* error;
+      }
       return {
         threadId: turnInput.threadId,
         turnId: active.id,

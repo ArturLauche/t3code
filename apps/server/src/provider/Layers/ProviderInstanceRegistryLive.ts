@@ -246,23 +246,34 @@ const makeReconcile = <R>(input: {
       const nextKeys = new Set<ProviderInstanceId>(
         nextRaw.map(([raw]) => ProviderInstanceId.make(raw)),
       );
-      const firstInstanceByDriver = new Map<ProviderDriverKind, ProviderInstanceId>();
+      const singleInstanceCandidates = new Map<
+        ProviderDriverKind,
+        Array<{ readonly instanceId: ProviderInstanceId; readonly enabled: boolean }>
+      >();
       const blockedMultipleInstanceIds = new Set<ProviderInstanceId>();
       for (const [rawInstanceId, entry] of nextRaw) {
         const driver = driversById.get(entry.driver);
         if (driver?.metadata.supportsMultipleInstances !== false) continue;
-        const instanceId = ProviderInstanceId.make(rawInstanceId);
-        const firstInstanceId = firstInstanceByDriver.get(entry.driver);
-        if (firstInstanceId === undefined) {
-          firstInstanceByDriver.set(entry.driver, instanceId);
-          continue;
-        }
-        blockedMultipleInstanceIds.add(instanceId);
-        yield* Effect.logWarning("Provider driver does not support multiple instances", {
-          driver: entry.driver,
-          instanceId,
-          keptInstanceId: firstInstanceId,
+        const candidates = singleInstanceCandidates.get(entry.driver) ?? [];
+        candidates.push({
+          instanceId: ProviderInstanceId.make(rawInstanceId),
+          enabled:
+            entry.enabled !== false && providerInstanceConfigEnabledFlag(entry.config) !== false,
         });
+        singleInstanceCandidates.set(entry.driver, candidates);
+      }
+      for (const [driver, candidates] of singleInstanceCandidates) {
+        const kept = candidates.find((candidate) => candidate.enabled) ?? candidates[0];
+        if (!kept) continue;
+        for (const candidate of candidates) {
+          if (candidate.instanceId === kept.instanceId) continue;
+          blockedMultipleInstanceIds.add(candidate.instanceId);
+          yield* Effect.logWarning("Provider driver does not support multiple instances", {
+            driver,
+            instanceId: candidate.instanceId,
+            keptInstanceId: kept.instanceId,
+          });
+        }
       }
 
       // 1. Close scopes for instances that disappeared or whose config

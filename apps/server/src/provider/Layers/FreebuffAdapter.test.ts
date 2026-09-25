@@ -187,6 +187,11 @@ describe("Freebuff screen classification", () => {
         `login required\n${Array.from({ length: 130 }, () => "historical output").join("\n")}\nEnter a coding task or / for commands`,
       ).kind,
     ).toBe("chat");
+    expect(
+      classifyFreebuffScreen(
+        "> fix the login required redirect\nEnter a coding task or / for commands",
+      ).kind,
+    ).toBe("chat");
     expect(classifyFreebuffScreen("loading...").kind).toBe("busy");
     expect(
       classifyFreebuffScreen(
@@ -304,6 +309,17 @@ describe("extractVisibleAssistantText", () => {
     ).toBe("answer");
   });
 
+  it("keeps bracketed assistant text that is not attachment context", () => {
+    expect(
+      extractVisibleAssistantText({
+        baseline: "Enter a coding task or / for commands",
+        current:
+          "Enter a coding task or / for commands\n> Explain\n[Attached file discussion]\nanswer",
+        prompt: "Explain",
+      }),
+    ).toBe("[Attached file discussion]\nanswer");
+  });
+
   it("strips echoed runtime instructions from assistant output", () => {
     expect(
       extractVisibleAssistantText({
@@ -404,6 +420,35 @@ describe("FreebuffAdapter", () => {
     }),
   );
 
+  it.live("removes a persisted trust flag unless repository-agent trust is enabled", () =>
+    Effect.gen(function* () {
+      const process = new FakePtyProcess();
+      const spawnInputs: PtyAdapter.PtySpawnInput[] = [];
+      const adapter = yield* makeFreebuffAdapter({
+        settings: decodeSettings({
+          enabled: true,
+          binaryPath: "/opt/freebuff",
+          configDir: "/tmp/freebuff-test",
+          launchArgs: "--trust-agents --some-option",
+        }),
+        configDir: "/tmp/freebuff-test",
+        environment: {},
+        instanceId,
+        defaultCwd: "/workspace/project",
+      }).pipe(
+        Effect.provideService(PtyAdapter.PtyAdapter, {
+          spawn: (input) => {
+            spawnInputs.push(input);
+            return Effect.succeed(process);
+          },
+        }),
+      );
+
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      expect(spawnInputs[0]?.args).toEqual(["--some-option", "--cwd", "/workspace/project"]);
+    }),
+  );
+
   it.live("rejects restricted runtime and unsupported plan semantics", () =>
     Effect.gen(function* () {
       const process = new FakePtyProcess();
@@ -475,6 +520,9 @@ describe("FreebuffAdapter", () => {
       );
 
       const collected = yield* Fiber.join(events);
+      expect(collected.find((event) => event.type === "turn.started")?.payload).toMatchObject({
+        model: FREEBUFF_DEFAULT_MODEL,
+      });
       const completed = collected.find((event) => event.type === "turn.completed");
       expect(completed?.payload).toMatchObject({
         state: "failed",

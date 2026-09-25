@@ -355,6 +355,41 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
     ),
   );
 
+  it.live("prefers an enabled instance when a single-instance driver has a disabled shadow", () =>
+    Effect.gen(function* () {
+      const disabledId = ProviderInstanceId.make("freebuff_disabled_first");
+      const enabledId = ProviderInstanceId.make("freebuff_enabled_second");
+      const driver = ProviderDriverKind.make("freebuff");
+      const { registry } = yield* makeProviderInstanceRegistry({
+        drivers: [FreebuffDriver],
+        configMap: {
+          [disabledId]: {
+            driver,
+            displayName: "Freebuff disabled",
+            enabled: false,
+            config: { enabled: false },
+          },
+          [enabledId]: {
+            driver,
+            displayName: "Freebuff enabled",
+            enabled: true,
+            config: { enabled: true },
+          },
+        },
+      });
+
+      expect((yield* registry.listInstances).map((instance) => instance.instanceId)).toEqual([
+        enabledId,
+      ]);
+      const unavailable = yield* registry.listUnavailable;
+      expect(unavailable).toHaveLength(1);
+      expect(unavailable[0]?.instanceId).toBe(disabledId);
+    }).pipe(
+      Effect.provideService(PtyAdapter.PtyAdapter, TestPtyAdapterService),
+      Effect.provide(testLayer),
+    ),
+  );
+
   it.live("treats an explicit in-config enabled:false as disabling despite the envelope", () =>
     Effect.gen(function* () {
       // Old settings files can carry both flags with conflicting values.
