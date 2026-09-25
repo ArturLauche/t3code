@@ -2,6 +2,11 @@ import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
+import {
+  getProviderSupportedRuntimeModes,
+  getUnsupportedProviderAttachmentReason,
+  getUnsupportedProviderInputReason,
+} from "@t3tools/shared/providerCapabilities";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -1077,6 +1082,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  /** Access modes the selected provider can actually enforce. */
+  supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   size?: "sm" | "xs";
   hidden?: boolean;
   onToggleInteractionMode: () => void;
@@ -1087,6 +1094,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
+  const offeredRuntimeModes = runtimeModeOptions.filter((mode) =>
+    (props.supportedRuntimeModes ?? runtimeModeOptions).includes(mode),
+  );
   const interactionModeTooltip =
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
@@ -1154,7 +1164,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <SelectValue data-composer-control-label>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {runtimeModeOptions.map((mode) => {
+            {offeredRuntimeModes.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
               return (
@@ -1925,21 +1935,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     settings,
   });
-  const providerSendBlockReason = getAntigravitySendBlockReason(
-    selectedProviderEntry?.snapshot,
-    selectedModel,
-  );
-  const sendDisabledReason =
-    externalSendDisabledReason ??
-    (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
-    (activePendingProgress
-      ? attachmentBlockReason
-      : (attachmentBlockReason ??
-        (multipleModelSelections === null ? providerSendBlockReason : null)));
-  const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = useMemo(
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
+  );
+  const providerSendBlockReason = getAntigravitySendBlockReason(
+    selectedProviderEntry?.snapshot,
+    selectedModel,
   );
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
   const selectedProviderSkills = selectedProviderStatus
@@ -2039,6 +2041,32 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
+  // Access mode and attachment support are declared by the provider snapshot, so
+  // an agent that cannot honor the current turn's settings says so here instead
+  // of failing inside the adapter after Send.
+  const unsupportedProviderInput = getUnsupportedProviderInputReason({
+    provider: selectedProviderStatus,
+    runtimeMode,
+    interactionMode,
+    attachmentCount: attachmentDraft.images.length,
+  });
+  const providerCapabilitySendBlockReason = activePendingProgress
+    ? null
+    : (unsupportedProviderInput?.reason ?? null);
+  const sendDisabledReason =
+    externalSendDisabledReason ??
+    (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
+    (activePendingProgress
+      ? attachmentBlockReason
+      : (attachmentBlockReason ??
+        providerCapabilitySendBlockReason ??
+        (multipleModelSelections === null ? providerSendBlockReason : null)));
+  const isSendDisabled = sendDisabledReason !== null;
+  // Access modes the picker may offer, narrowed to what this provider enforces.
+  const supportedProviderRuntimeModes = useMemo(
+    () => getProviderSupportedRuntimeModes(selectedProviderStatus),
+    [selectedProviderStatus],
+  );
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
@@ -2711,8 +2739,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const addComposerImagesToDraft = useCallback(
-    (images: ComposerImageAttachment[]) => addComposerDraftImages(attachmentDraftTarget, images),
-    [attachmentDraftTarget, addComposerDraftImages],
+    (images: ComposerImageAttachment[]) => {
+      // Reject at the door: a provider that drops non-text content would
+      // otherwise accept the image and silently discard it on Send.
+      const reason = getUnsupportedProviderAttachmentReason({
+        provider: selectedProviderStatus,
+        attachmentCount: images.length,
+      });
+      if (reason !== null) {
+        toastManager.add({ type: "error", title: "Attachments unavailable", description: reason });
+        return [];
+      }
+      return addComposerDraftImages(attachmentDraftTarget, images);
+    },
+    [attachmentDraftTarget, addComposerDraftImages, selectedProviderStatus],
   );
 
   const addComposerFilesToDraft = useCallback(
@@ -4975,6 +5015,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           showInteractionModeToggle={planModeUiEnabled}
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
+          supportedRuntimeModes={supportedProviderRuntimeModes}
           size={composerControlsInStrip ? "xs" : "sm"}
           hidden={composerControlsHidden || restingHiddenBlockCount > 0}
           onToggleInteractionMode={toggleInteractionMode}
@@ -5129,6 +5170,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <CompactComposerControlsMenu
             interactionMode={interactionMode}
             runtimeMode={runtimeMode}
+            supportedRuntimeModes={supportedProviderRuntimeModes}
             size={composerControlsInStrip ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
@@ -5411,6 +5453,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     }
     if (acceptedImages.length === 0) return insertedAny;
+
+    // Refuse images here, before compression: a provider that drops non-text
+    // content must not accept the pick, the paste or the drop only to discard
+    // it on Send.
+    const unsupportedImageReason = getUnsupportedProviderAttachmentReason({
+      provider: selectedProviderStatus,
+      attachmentCount: acceptedImages.length,
+    });
+    if (unsupportedImageReason !== null) {
+      for (const image of composerImages) URL.revokeObjectURL(image.previewUrl);
+      toastManager.add({
+        type: "error",
+        title: "Attachments unavailable",
+        description: unsupportedImageReason,
+      });
+      return insertedAny;
+    }
 
     pendingImageCompressionsRef.current.set(
       attachmentTargetKey,

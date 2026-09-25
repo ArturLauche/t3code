@@ -12,9 +12,19 @@ const ATTACHMENT_MENU_ACTIONS: MenuAction[] = [
 export function ComposerAttachmentButton(props: {
   readonly disabled?: boolean;
   readonly supportsFiles: boolean;
+  /**
+   * Whether the selected provider can consume images in a prompt. Absent means
+   * yes. Some agents advertise image prompts and then drop every non-text
+   * block, so offering the picker would collect a photo that never arrives.
+   */
+  readonly supportsImages?: boolean;
   readonly onPickMedia: () => Promise<void>;
   readonly onPickFiles: () => Promise<void>;
 }) {
+  const supportsImages = props.supportsImages !== false;
+  const actions = ATTACHMENT_MENU_ACTIONS.filter(
+    (action) => supportsImages || action.id !== "photos",
+  );
   const button = (
     <Pressable
       accessibilityLabel="Add attachment"
@@ -22,7 +32,7 @@ export function ComposerAttachmentButton(props: {
       accessibilityState={{ disabled: props.disabled }}
       className="size-[44px] shrink-0 items-center justify-center rounded-full active:opacity-70 disabled:opacity-50"
       disabled={props.disabled}
-      onPress={props.supportsFiles ? undefined : () => void props.onPickMedia()}
+      onPress={actions.length > 1 ? undefined : () => void props.onPickMedia()}
     >
       <SymbolView
         name="plus"
@@ -34,8 +44,10 @@ export function ComposerAttachmentButton(props: {
     </Pressable>
   );
 
-  if (props.disabled || !props.supportsFiles) {
-    return button;
+  // A single remaining action does not need a menu, and no actions at all
+  // means the provider cannot take anything this composer can produce.
+  if (props.disabled || actions.length <= 1) {
+    return actions.length === 0 ? null : button;
   }
 
   return (
@@ -43,7 +55,7 @@ export function ComposerAttachmentButton(props: {
       accessible
       accessibilityLabel="Add attachment"
       accessibilityRole="button"
-      actions={ATTACHMENT_MENU_ACTIONS}
+      actions={actions}
       onPressAction={({ nativeEvent }) => {
         if (nativeEvent.event === "photos") {
           void props.onPickMedia();

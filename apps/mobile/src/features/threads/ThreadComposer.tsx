@@ -77,9 +77,16 @@ import {
 } from "../../components/ComposerToolbar";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import {
+  getProviderSupportedRuntimeModes,
+  getUnsupportedProviderAttachmentReason,
+  getUnsupportedProviderInputReason,
+  providerSupportsImageAttachments,
+} from "@t3tools/shared/providerCapabilities";
+import {
   composerStripAttachments,
   type DraftComposerAttachment,
   type DraftComposerFileAttachment,
+  isComposerImageAttachment,
 } from "../../lib/composerImages";
 import {
   buildModelOptions,
@@ -330,6 +337,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ) ?? null
     );
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
+  // Access modes the picker may offer, narrowed to what this provider enforces.
+  const supportedProviderRuntimeModes = getProviderSupportedRuntimeModes(selectedProviderStatus);
   const composerOwnerKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
   const openDraftDocument = (attachment: ComposerDocumentAttachment) => {
     Keyboard.dismiss();
@@ -414,10 +423,20 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     states: uploadStates,
   });
   const contextImports = useAtomValue(composerContextImportsAtom);
+  // Access mode and attachment support come from the provider snapshot, so an
+  // agent that cannot honor this turn says so here instead of failing inside
+  // the adapter after the message left the device.
+  const providerCapabilitySendBlockReason = getUnsupportedProviderInputReason({
+    provider: selectedProviderStatus,
+    runtimeMode: currentRuntimeMode,
+    interactionMode: props.selectedThread.interactionMode,
+    attachmentCount: props.draftAttachments.filter(isComposerImageAttachment).length,
+  });
   const sendBlockedReason =
     props.sendBlockedReason ??
     (pendingPastedTextAttachmentCount > 0 ? "Attaching pasted text" : null) ??
-    attachmentBlockReason;
+    attachmentBlockReason ??
+    providerCapabilitySendBlockReason?.reason;
   const canSend =
     hasContent &&
     !contextImports[composerOwnerKey] &&
@@ -558,6 +577,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         props.onUpdateModelSelection({ ...currentModelSelection, options }),
       runtimeMode: currentRuntimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
+      supportedRuntimeModes: supportedProviderRuntimeModes,
     }),
     [
       currentModelSelection,
@@ -566,6 +586,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,
       settingsOwnerId,
+      supportedProviderRuntimeModes,
       threadProviderGroups,
     ],
   );
@@ -703,6 +724,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 supportsFiles={Boolean(
                   props.serverConfig?.environment.capabilities.fileAttachments,
                 )}
+                supportsImages={providerSupportsImageAttachments(selectedProviderStatus)}
                 onPickMedia={props.onPickDraftMedia}
                 onPickFiles={props.onPickDraftFiles}
               />
@@ -761,7 +783,19 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 selection={composerMenu.selection}
                 onChangeText={props.onChangeDraftMessage}
                 onSelectionChange={composerMenu.onSelectionChange}
-                onPasteImages={(uris) => void props.onNativePasteImages(uris)}
+                onPasteImages={(uris) => {
+                  // Refuse at the door: a provider that drops non-text content
+                  // would otherwise accept the paste and discard it on send.
+                  const reason = getUnsupportedProviderAttachmentReason({
+                    provider: selectedProviderStatus,
+                    attachmentCount: uris.length,
+                  });
+                  if (reason !== null) {
+                    Alert.alert("Attachments unavailable", reason);
+                    return;
+                  }
+                  void props.onNativePasteImages(uris);
+                }}
                 onPasteText={(paste) => {
                   const insertPaste = () => {
                     const insertion = replaceTextSelection({
@@ -954,6 +988,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       supportsFiles={Boolean(
                         props.serverConfig?.environment.capabilities.fileAttachments,
                       )}
+                      supportsImages={providerSupportsImageAttachments(selectedProviderStatus)}
                       onPickMedia={props.onPickDraftMedia}
                       onPickFiles={props.onPickDraftFiles}
                     />
