@@ -1097,6 +1097,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const offeredRuntimeModes = runtimeModeOptions.filter((mode) =>
     (props.supportedRuntimeModes ?? runtimeModeOptions).includes(mode),
   );
+  // Kept listed and marked rather than dropped: see CompactComposerControlsMenu.
+  const currentModeIsUnsupported = !offeredRuntimeModes.includes(props.runtimeMode);
   const interactionModeTooltip =
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
@@ -1183,6 +1185,21 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 </SelectItem>
               );
             })}
+            {currentModeIsUnsupported ? (
+              <SelectItem value={props.runtimeMode} disabled hideIndicator className="min-w-64">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="grid min-w-0 flex-1 gap-0.5">
+                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                      <RuntimeModeIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                      {runtimeModeOption.label} (unsupported)
+                    </span>
+                    <span className="text-muted-foreground text-xs leading-4">
+                      {runtimeModeOption.description}
+                    </span>
+                  </div>
+                </div>
+              </SelectItem>
+            ) : null}
           </SelectPopup>
         </Select>
         <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
@@ -2048,7 +2065,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     runtimeMode,
     interactionMode,
-    attachmentCount: attachmentDraft.images.length,
+    // Both kinds, and counted apart: a provider that drops images usually
+    // drops files too, and the message has to name what is actually attached.
+    attachmentCount: attachmentDraft.images.length + attachmentDraft.files.length,
+    fileCount: attachmentDraft.files.length,
   });
   const providerCapabilitySendBlockReason = activePendingProgress
     ? null
@@ -5462,7 +5482,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       attachmentCount: acceptedImages.length,
     });
     if (unsupportedImageReason !== null) {
-      for (const image of composerImages) URL.revokeObjectURL(image.previewUrl);
+      // Nothing to release: the rejected picks are still raw `File` objects.
+      // Object URLs are only minted below, after compression. Revoking the
+      // draft's own previews here would blank the images that stay attached.
       toastManager.add({
         type: "error",
         title: "Attachments unavailable",

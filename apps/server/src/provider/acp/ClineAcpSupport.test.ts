@@ -428,11 +428,39 @@ describe("classifyClineAuthFailure", () => {
     });
   });
 
-  it("reads the real CLI's thrown auth guard as unauthenticated", () => {
-    // The live guard does not survive as a typed error: the ACP error carries a
-    // `cause` the generated schema cannot decode, so decoding it throws and the
-    // typed error is replaced by this plain Error. Without this branch Settings
+  it("reads the verified typed -32000 guard as unauthenticated", () => {
+    // The shape Cline 3.0.65 actually sends: a well-formed session/new error.
+    const thrown = Cause.fail(
+      new EffectAcpErrors.AcpRequestError({
+        code: -32000,
+        method: "session/new",
+        errorMessage: "Authentication required: Call authenticate before starting a session",
+      }),
+    );
+    assert.deepStrictEqual(classifyClineAuthFailure(thrown), { kind: "unauthenticated" });
+  });
+
+  it("reads an auth guard printed to stderr by an exiting process", () => {
+    // A build that gives up before answering produces no request error, so the
+    // captured stderr is the only text available. Without this branch Settings
     // would report a broken CLI instead of `cline auth`.
+    const thrown = Cause.fail(
+      new EffectAcpErrors.AcpProcessExitedError({
+        code: 1,
+        stderr: "Authentication required: Call authenticate before starting a session",
+      }),
+    );
+    assert.deepStrictEqual(classifyClineAuthFailure(thrown), { kind: "unauthenticated" });
+  });
+
+  it("does not read a process exit with no auth text as unauthenticated", () => {
+    const thrown = Cause.fail(new EffectAcpErrors.AcpProcessExitedError({ code: 1 }));
+    assert.deepStrictEqual(classifyClineAuthFailure(thrown), { kind: "failed" });
+  });
+
+  it("falls back to a thrown guard's message when no typed error survives", () => {
+    // Defensive: a build whose failure never becomes a typed error leaves only
+    // the text, with no method to check.
     const thrown = Cause.die(
       new Error("Authentication required: Call authenticate before starting a session"),
     );

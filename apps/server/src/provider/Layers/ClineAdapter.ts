@@ -17,9 +17,10 @@
  *   would otherwise write their model and then each prompt under the other's
  *   selection. A per-session semaphore covers configure → prompt → drain.
  * - **Permission handling is the whole access-mode story.** Cline offers one
- *   `auto_approve` boolean and no per-tool policy, so `approval-required` maps
- *   to asking the user and `full-access` maps to approving here. The two
- *   in-between T3 modes are rejected up front rather than widened.
+ *   `auto_approve` boolean and no per-tool policy, so there is no middle
+ *   setting to map onto. `approval-required` asks the user, and `full-access`
+ *   answers each request with Cline's own accept option; the two in-between T3
+ *   modes are rejected up front rather than widened.
  *
  * @module ClineAdapterLive
  */
@@ -136,6 +137,13 @@ interface ClineSessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  /**
+   * Turns cancelled before their prompt reached the CLI. `session/cancel` is a
+   * notification, so a Stop that lands while the model and mode are still being
+   * configured has nothing to cancel on the Cline side; the sendTurn that owns
+   * the turn checks this and abandons it instead of prompting anyway.
+   */
+  readonly interruptedTurnIds: Set<TurnId>;
   /** Number of sendTurn prompts in flight or being prepared. */
   promptsInFlight: number;
   stopped: boolean;
@@ -603,6 +611,7 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            interruptedTurnIds: new Set(),
             promptsInFlight: 0,
             stopped: false,
           };
@@ -615,6 +624,19 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
                     yield* Deferred.succeed(event.acknowledge, undefined);
                     return;
                   case "ModeChanged":
+                    return;
+                  case "ConnectionTerminated":
+                    // The Cline process is gone. Without this the session keeps
+                    // reporting `ready` and every later turn fails against a
+                    // dead connection, so retire it the same way a stop does.
+                    yield* Effect.logWarning("Cline ACP connection terminated", {
+                      threadId: ctx.threadId,
+                      detail: event.error.message,
+                    });
+                    // Forked, not awaited: this runs on the notification fiber
+                    // that stopSessionInternal interrupts, so waiting here
+                    // would deadlock on itself.
+                    yield* Effect.forkIn(ctx.scope)(stopSessionInternal(ctx));
                     return;
                   case "AssistantItemStarted":
                     yield* offerRuntimeEvent(
@@ -749,6 +771,14 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
 
         // Only the last remaining prompt settles the turn, so the decrement
         // decides whether `turn.completed` is published.
+        //
+        // A turn that never published `turn.started` must not be settled with a
+        // terminal event either: ingestion deliberately accepts a named
+        // completion for a turn it never saw start, so a pre-flight validation
+        // rejection would persist a phantom failed turn on top of the failure
+        // activity the command reactor already appends. A steering prompt
+        // inherits the started turn it is riding on.
+        let turnStarted = steeringTurnId !== undefined;
         const settleTurn = (
           state: "completed" | "cancelled" | "failed",
           stopReason: string | null,
@@ -757,6 +787,9 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
             input.threadId,
             Effect.gen(function* () {
               if (ctx.promptsInFlight !== 1 || ctx.stopped) {
+                return;
+              }
+              if (!turnStarted) {
                 return;
               }
               yield* offerRuntimeEvent({
@@ -853,6 +886,17 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
                   );
               }
 
+              // A Stop that landed during the configuration RPCs above left no
+              // prompt on the CLI to cancel, so honour it here instead of
+              // starting a turn the user already dismissed.
+              if (ctx.interruptedTurnIds.delete(turnId)) {
+                return yield* new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/prompt",
+                  detail: "Cline turn was cancelled before the prompt was sent.",
+                });
+              }
+
               ctx.activeTurnId = turnId;
               if (steeringTurnId === undefined) {
                 ctx.lastPlanFingerprint = undefined;
@@ -864,6 +908,7 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
                 ...(requestedModelId !== undefined ? { model: requestedModelId } : {}),
               };
               if (steeringTurnId === undefined) {
+                turnStarted = true;
                 yield* offerRuntimeEvent({
                   type: "turn.started",
                   ...(yield* makeEventStamp()),
@@ -924,6 +969,9 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
                 input.threadId,
                 Effect.sync(() => {
                   ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+                  // Drop any record the turn never consumed, so a long-lived
+                  // session does not accumulate cancelled turn ids.
+                  ctx.interruptedTurnIds.delete(turnId);
                   // Clear the active turn once nothing is left running, so a
                   // finished session is not reported as active and later
                   // notifications are not attributed to a completed turn.
@@ -937,9 +985,24 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
           );
       });
 
-    const interruptTurn: ClineAdapterShape["interruptTurn"] = (threadId) =>
+    const interruptTurn: ClineAdapterShape["interruptTurn"] = (threadId, turnId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
+        // Record the cancellation for the sendTurn that still holds the prompt
+        // permit: it takes no lock here, so a Stop during its configuration RPCs
+        // would otherwise find no prompt on the CLI to cancel and the turn would
+        // run to completion anyway.
+        //
+        // A turn id that disagrees with a running turn belongs to a different
+        // turn, so it is ignored rather than cancelling the live prompt.
+        const activeTurnId = ctx.activeTurnId;
+        const targetTurnId = turnId ?? activeTurnId;
+        if (activeTurnId !== undefined && targetTurnId !== activeTurnId) {
+          return;
+        }
+        if (targetTurnId !== undefined) {
+          ctx.interruptedTurnIds.add(targetTurnId);
+        }
         // Answer any parked permission request before cancelling: the Cline
         // handler is blocked on its Deferred and would otherwise hold the
         // request open past the cancelled prompt.

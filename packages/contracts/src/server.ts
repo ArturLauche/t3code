@@ -226,6 +226,12 @@ export const ServerProvider = Schema.Struct({
   // client that trusts the ACP flag would let a user attach an image that is
   // discarded without a trace.
   supportsImageAttachments: Schema.optional(Schema.Boolean),
+  // Whether the agent consumes file content blocks sent in a prompt. Absent
+  // means true. Kept separate from the image flag because the two are not the
+  // same question: a client that refuses a file because the provider dropped
+  // images would block attachments the provider would have accepted. Cline
+  // discards every non-text block, so it declares false for both.
+  supportsFileAttachments: Schema.optional(Schema.Boolean),
   // The driver streams context window usage, so a started thread will have a
   // meter once its activities load. Clients reserve the meter's space on it.
   reportsContextWindow: Schema.optional(Schema.Boolean),

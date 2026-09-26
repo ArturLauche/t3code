@@ -22,9 +22,19 @@ export function ComposerAttachmentButton(props: {
   readonly onPickFiles: () => Promise<void>;
 }) {
   const supportsImages = props.supportsImages !== false;
+  // Both capabilities gate the menu, not just images: a server without file
+  // attachments must not be offered a file picker either.
   const actions = ATTACHMENT_MENU_ACTIONS.filter(
-    (action) => supportsImages || action.id !== "photos",
+    (action) =>
+      (action.id !== "photos" || supportsImages) && (action.id !== "files" || props.supportsFiles),
   );
+  const runAction = (id: string) => () => {
+    if (id === "photos") {
+      void props.onPickMedia();
+    } else if (id === "files") {
+      void props.onPickFiles();
+    }
+  };
   const button = (
     <Pressable
       accessibilityLabel="Add attachment"
@@ -32,7 +42,9 @@ export function ComposerAttachmentButton(props: {
       accessibilityState={{ disabled: props.disabled }}
       className="size-[44px] shrink-0 items-center justify-center rounded-full active:opacity-70 disabled:opacity-50"
       disabled={props.disabled}
-      onPress={actions.length > 1 ? undefined : () => void props.onPickMedia()}
+      // One remaining action runs directly, and it has to be the action that
+      // survived the filter rather than a hard-coded media pick.
+      onPress={actions.length > 1 ? undefined : runAction(actions[0]?.id ?? "")}
     >
       <SymbolView
         name="plus"
@@ -56,13 +68,7 @@ export function ComposerAttachmentButton(props: {
       accessibilityLabel="Add attachment"
       accessibilityRole="button"
       actions={actions}
-      onPressAction={({ nativeEvent }) => {
-        if (nativeEvent.event === "photos") {
-          void props.onPickMedia();
-        } else if (nativeEvent.event === "files") {
-          void props.onPickFiles();
-        }
-      }}
+      onPressAction={({ nativeEvent }) => runAction(nativeEvent.event)()}
     >
       {button}
     </ControlPillMenu>

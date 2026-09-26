@@ -86,11 +86,18 @@ maintainer will otherwise get wrong:
 flow: it writes a URL to stderr, tries to open a browser, and then blocks until someone finishes
 it. On a T3 server that browser opens on a machine the user is not sitting at, and the request
 never returns. The runtime therefore leaves `authMethodId` unset for Cline and reads
-authentication out of the session-setup answer instead — Cline fails `session/new` with
-`-32000 Authentication required` when it has no usable credential. That single error is the whole
-auth check, and the classifier is deliberately narrow about it: `-32000` is a generic ACP code, so
-the method and the message wording must both line up before Settings tells a user to run
-`cline auth`. See [Cline ACP support](../../apps/server/src/provider/acp/ClineAcpSupport.ts).
+authentication out of the session-setup answer instead.
+
+Do not assume the guard is always a well-formed response, even though that is the verified shape.
+Against Cline 3.0.65 an unauthenticated CLI answers `session/new` with
+`-32000 {"message":"Authentication required: Call authenticate before starting a session"}`, and
+that is the path the live probe exercises. A build that gives up earlier yields no request error at
+all: it can print the guard to stderr and exit, which surfaces as an `AcpProcessExitedError`, or
+fail so early that only a thrown defect carries text. The classifier reads all three, and is
+deliberately narrow about each: `-32000` is a generic ACP code, so the method and the message wording
+must both line up, and anything that reads like a startup failure (`spawn`, `ENOENT`, `not found`)
+stays a broken install even when it mentions the API key.
+See [Cline ACP support](../../apps/server/src/provider/acp/ClineAcpSupport.ts).
 
 **The model option cannot be found by category.** Cline advertises its provider picker with
 `category: "model"` and lists it _before_ the model picker, so the shared "first model-category
@@ -99,10 +106,13 @@ instead of the model. Cline resolves its own option id. The same call rejects a 
 the advertised catalog, because `session/set_model` accepts any string on this build.
 
 **Tool approval has exactly one knob.** Cline exposes a single `auto_approve` boolean: no per-tool
-policies, nothing between "ask about everything" and "approve everything". T3's `Supervised` and
-`Full access` map onto those two states and are the only modes the driver accepts; the two
-in-between modes are declared unsupported on the snapshot rather than silently widened.
-See [Cline provider](../../apps/server/src/provider/Layers/ClineProvider.ts).
+policies, nothing between "ask about everything" and "approve everything". T3 therefore accepts only
+`Supervised` and `Full access`, and implements the difference in its own permission handler rather
+than by writing that boolean: Supervised asks the user through the normal approval event, and Full
+access answers each request with Cline's own accept option. Cline does not remember a previous
+"allow always", so Full access re-approves every request instead of pretending the CLI learned the
+answer. The two in-between T3 modes are declared unsupported on the snapshot rather than silently
+widened. See [Cline provider](../../apps/server/src/provider/Layers/ClineProvider.ts).
 
 Three more limits are declared the same way instead of being discovered at send time. Cline
 advertises `promptCapabilities.image: true` and then discards every non-text block before

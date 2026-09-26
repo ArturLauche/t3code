@@ -1391,6 +1391,9 @@ export function NewTaskThreadSettingsRouteScreen() {
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}
+      // Passed like the thread sheet does, so a new thread cannot be started in
+      // an access mode the provider it was just switched to cannot enforce.
+      supportedRuntimeModes={getProviderSupportedRuntimeModes(flow.selectedProviderStatus)}
       onUpdateRuntimeMode={flow.setRuntimeMode}
     >
       <ThreadSettingsPickerNavigator onClose={() => navigation.goBack()} />

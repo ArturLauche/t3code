@@ -39,6 +39,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   const offeredRuntimeModes = RUNTIME_MODE_LABELS_ORDER.filter((mode) =>
     (props.supportedRuntimeModes ?? RUNTIME_MODE_LABELS_ORDER).includes(mode),
   );
+  // A thread can sit in a mode the selected provider cannot enforce. Dropping
+  // it from the list would leave the trigger naming a value the menu cannot
+  // offer, hiding the very reason Send is blocked, so it stays listed as
+  // unavailable.
+  const currentModeIsUnsupported = !offeredRuntimeModes.includes(props.runtimeMode);
 
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -92,6 +97,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               {RUNTIME_MODE_LABELS[mode]}
             </MenuRadioItem>
           ))}
+          {currentModeIsUnsupported ? (
+            <MenuRadioItem value={props.runtimeMode} disabled>
+              {RUNTIME_MODE_LABELS[props.runtimeMode]} (unsupported)
+            </MenuRadioItem>
+          ) : null}
         </MenuRadioGroup>
       </MenuPopup>
     </Menu>

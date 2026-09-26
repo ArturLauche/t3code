@@ -8,6 +8,7 @@ import {
   getUnsupportedProviderInputBannerCopy,
   getUnsupportedProviderInputReason,
   getUnsupportedProviderModeReason,
+  providerSupportsFileAttachments,
   providerSupportsImageAttachments,
   providerSupportsRuntimeMode,
   RUNTIME_MODE_LABELS,
@@ -84,8 +85,10 @@ describe("getUnsupportedProviderModeReason", () => {
       interactionMode: "default",
     });
     expect(reason).toContain("Cline does not support the selected access mode");
-    // The suggestion must be one of the declared modes, never a hard-coded one.
-    expect(reason).toContain(RUNTIME_MODE_LABELS["full-access"]);
+    // The narrowest supported mode, so following the advice cannot widen the
+    // grant the user already chose.
+    expect(reason).toContain(RUNTIME_MODE_LABELS["approval-required"]);
+    expect(reason).not.toContain(RUNTIME_MODE_LABELS["full-access"]);
   });
 
   it("picks the narrowest declared mode when full access is unavailable", () => {
@@ -96,6 +99,20 @@ describe("getUnsupportedProviderModeReason", () => {
     });
     expect(reason).toContain(RUNTIME_MODE_LABELS["approval-required"]);
     expect(reason).not.toContain(RUNTIME_MODE_LABELS["full-access"]);
+  });
+
+  it("reports a current mode the provider cannot enforce", () => {
+    // The two pickers drop unsupported modes from the list but must still show
+    // the thread's actual value, marked unavailable, or the state blocking Send
+    // is invisible where the mode is chosen.
+    const cline = provider({ supportedRuntimeModes: ["approval-required", "full-access"] });
+    const offered = getProviderSupportedRuntimeModes(cline);
+    expect(offered).toEqual(["approval-required", "full-access"]);
+    expect(offered.includes("auto")).toBe(false);
+    expect(providerSupportsRuntimeMode(cline, "auto")).toBe(false);
+    // A mode the provider does enforce is not marked.
+    expect(providerSupportsRuntimeMode(cline, "full-access")).toBe(true);
+    expect(providerSupportsRuntimeMode(cline, "approval-required")).toBe(true);
   });
 
   it("treats an empty declaration as unrestricted, not as unrecoverable", () => {
@@ -151,6 +168,61 @@ describe("attachment capabilities", () => {
     expect(
       getUnsupportedProviderAttachmentReason({ provider: cline, attachmentCount: 0 }),
     ).toBeNull();
+  });
+
+  it("rejects files for a provider that declares no file support", () => {
+    const cline = provider({ supportsFileAttachments: false });
+    expect(providerSupportsFileAttachments(cline)).toBe(false);
+    const reason = getUnsupportedProviderAttachmentReason({
+      provider: cline,
+      attachmentCount: 1,
+      fileCount: 1,
+    });
+    // The message must not send the user looking for an image they never added.
+    expect(reason).toContain("Cline does not support file attachments");
+    expect(reason).not.toContain("image");
+  });
+
+  it("keeps image and file support independent", () => {
+    // A provider can take a file and still drop an image, so one flag must not
+    // stand in for the other: only the attached kind may block the send.
+    const filesOnly = provider({ supportsImageAttachments: false });
+    expect(providerSupportsFileAttachments(filesOnly)).toBe(true);
+    // A file is fine here even though images are not.
+    expect(
+      getUnsupportedProviderAttachmentReason({
+        provider: filesOnly,
+        attachmentCount: 1,
+        fileCount: 1,
+      }),
+    ).toBeNull();
+    expect(
+      getUnsupportedProviderAttachmentReason({ provider: filesOnly, attachmentCount: 1 }),
+    ).toContain("image attachments");
+
+    const imagesOnly = provider({ supportsFileAttachments: false });
+    expect(providerSupportsImageAttachments(imagesOnly)).toBe(true);
+    // An image is fine here even though files are not.
+    expect(
+      getUnsupportedProviderAttachmentReason({ provider: imagesOnly, attachmentCount: 1 }),
+    ).toBeNull();
+    expect(
+      getUnsupportedProviderAttachmentReason({
+        provider: imagesOnly,
+        attachmentCount: 1,
+        fileCount: 1,
+      }),
+    ).toContain("file attachments");
+  });
+
+  it("names both kinds when a provider supports neither", () => {
+    const cline = provider({ supportsImageAttachments: false, supportsFileAttachments: false });
+    const reason = getUnsupportedProviderAttachmentReason({
+      provider: cline,
+      attachmentCount: 3,
+      fileCount: 1,
+    });
+    expect(reason).toContain("Cline does not support attachments");
   });
 });
 

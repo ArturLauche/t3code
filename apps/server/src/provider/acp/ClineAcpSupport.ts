@@ -40,6 +40,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { findSessionConfigOption } from "./AcpRuntimeModel.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import type { ProviderAdapterError } from "../Errors.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 
@@ -80,9 +81,13 @@ function clineDataDirEnv(clineSettings: ClineAcpRuntimeClineSettings | null | un
   if (!dataDir) {
     return {};
   }
+  // Expanded like every other provider's path setting: the child process does
+  // not run a shell, so a literal `~/...` would be passed through as a
+  // directory named "~" instead of the user's home.
+  const resolved = expandHomePath(dataDir);
   return {
-    [CLINE_DIR_ENV]: dataDir,
-    [CLINE_DATA_DIR_ENV]: dataDir,
+    [CLINE_DIR_ENV]: resolved,
+    [CLINE_DATA_DIR_ENV]: resolved,
   };
 }
 
@@ -92,7 +97,10 @@ export function buildClineAcpSpawnInput(
   environment?: NodeJS.ProcessEnv,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
-    command: clineSettings?.binaryPath || CLINE_BINARY,
+    // Expanded for the same reason as the data dir: a spawn has no shell to
+    // resolve `~`, and a path the user typed in Settings should work the way it
+    // does for the other providers.
+    command: expandHomePath(clineSettings?.binaryPath?.trim() || CLINE_BINARY),
     args: clineAcpSpawnArgs(),
     cwd,
     ...(environment
@@ -206,8 +214,13 @@ export function currentClineModelIdFromSessionSetup(
 
 /**
  * Flattens Cline's advertised catalog into T3 models. Grouped and flat selects
- * are both handled, blanks and duplicates are dropped, and exactly one entry is
- * marked default from the session's current selection.
+ * are both handled, and blanks and duplicates are dropped.
+ *
+ * At most one entry is marked default, and only when the session's current
+ * selection is actually in the catalog. A current model that is not advertised
+ * leaves every entry unmarked rather than promoting an arbitrary one: the
+ * session's own choice is not ours to second-guess, and a wrong default would
+ * silently pin the thread to a model the user did not pick.
  */
 export function clineModelsFromSessionSetup(
   sessionSetupResult: ClineSessionSetupResult,
@@ -254,6 +267,9 @@ export class ClineModelSelectionError extends Schema.TaggedError<ClineModelSelec
  * A selection outside the advertised catalog is rejected instead of forwarded:
  * `session/set_model` accepts any string on this build, so an unchecked slug
  * would silently pin the session to a model Cline never offered.
+ *
+ * The value written back is the advertised entry verbatim, not the trimmed
+ * request, because the runtime validates it against the advertised set.
  */
 export const applyClineAcpModelSelection = Effect.fn("applyClineAcpModelSelection")(
   function* (input: {
@@ -276,14 +292,15 @@ export const applyClineAcpModelSelection = Effect.fn("applyClineAcpModelSelectio
     if (advertised.length === 0) {
       return;
     }
-    if (!advertised.some((entry) => entry.value.trim() === requested)) {
+    const match = advertised.find((entry) => entry.value.trim() === requested);
+    if (!match) {
       return yield* new ClineModelSelectionError({ requestedModelId: requested });
     }
     if (option.currentValue.trim() === requested) {
       return;
     }
     yield* input.runtime
-      .setConfigOption(option.id, requested)
+      .setConfigOption(option.id, match.value)
       .pipe(Effect.mapError(input.mapError));
   },
 );
@@ -302,7 +319,13 @@ const CLINE_ACT_MODE_ALIASES: ReadonlyArray<string> = [
   "implement",
 ];
 
-/** Cline's Plan mode id when the session advertises one. */
+/**
+ * Cline's Act mode id when the session advertises one.
+ *
+ * Aliases and the Plan exclusion are matched against a normalized copy, but
+ * the id returned is the one exactly as advertised, because the runtime
+ * validates `session/set_mode` against the advertised set.
+ */
 export function resolveClineActModeId(
   modeState:
     | {
@@ -314,14 +337,28 @@ export function resolveClineActModeId(
   if (!modeState) {
     return undefined;
   }
-  const ids = modeState.availableModes.map((mode) => mode.id.trim().toLowerCase());
-  return (
-    CLINE_ACT_MODE_ALIASES.map((alias) => ids.find((id) => id === alias)).find(
-      (id): id is string => id !== undefined,
-    ) ??
-    ids.find((id) => !CLINE_PLAN_MODE_ALIASES.has(id)) ??
-    modeState.currentModeId
+  // First advertised occurrence wins, so a duplicated alias cannot reorder the
+  // match away from the id the session actually offered first.
+  const advertisedByNormalizedId = new Map<string, string>();
+  for (const mode of modeState.availableModes) {
+    const normalized = mode.id.trim().toLowerCase();
+    if (!advertisedByNormalizedId.has(normalized)) {
+      advertisedByNormalizedId.set(normalized, mode.id);
+    }
+  }
+  const aliasMatch = CLINE_ACT_MODE_ALIASES.map((alias) =>
+    advertisedByNormalizedId.get(alias),
+  ).find((id) => id !== undefined);
+  if (aliasMatch !== undefined) {
+    return aliasMatch;
+  }
+  const nonPlanId = [...advertisedByNormalizedId.keys()].find(
+    (normalized) => !CLINE_PLAN_MODE_ALIASES.has(normalized),
   );
+  if (nonPlanId !== undefined) {
+    return advertisedByNormalizedId.get(nonPlanId) ?? undefined;
+  }
+  return modeState.currentModeId;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -365,6 +402,7 @@ const CLINE_AUTH_REQUIRED_MESSAGE = /authenticat|sign(?:ed)?[ -]?in|credential|a
 const CLINE_STARTUP_FAILURE_MESSAGE = /spawn|enoent|not found|no such file|executable|timed? ?out/i;
 
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
+const isAcpProcessExitedError = Schema.is(EffectAcpErrors.AcpProcessExitedError);
 
 export type ClineDiscoveryFailure =
   | { readonly kind: "unauthenticated" }
@@ -390,37 +428,62 @@ function defectMessages(cause: Cause.Cause<unknown>): ReadonlyArray<string> {
 }
 
 /**
+ * Every message that could be Cline's auth guard, with the shape-specific
+ * precision already applied.
+ *
+ * The verified shape is a typed `AcpRequestError`: against Cline 3.0.65 an
+ * unauthenticated CLI answers `session/new` with a well-formed
+ * `-32000 {"message":"Authentication required: Call authenticate before starting
+ * a session"}`. The method and the `-32000` code both have to line up, because
+ * `-32000` is generic and an unrelated one must not read as a sign-in problem.
+ *
+ * The other two are defensive, for builds that give up earlier and never
+ * produce that response at all:
+ *
+ * - A typed `AcpProcessExitedError`. A CLI that prints the guard to stderr and
+ *   exits without answering yields no request error, so only the captured stderr
+ *   counts — the wrapper's own "ACP process exited" text says nothing about why.
+ * - A thrown defect, whose message is the last text left when a failure never
+ *   becomes a typed error.
+ */
+function clineAuthCandidateMessages(
+  cause: Cause.Cause<EffectAcpErrors.AcpError>,
+): ReadonlyArray<string> {
+  const messages: Array<string> = [...defectMessages(cause)];
+  const error = Cause.findErrorOption(cause);
+  if (Option.isSome(error)) {
+    if (
+      isAcpRequestError(error.value) &&
+      error.value.code === -32000 &&
+      error.value.method !== undefined &&
+      CLINE_SESSION_SETUP_METHODS.has(error.value.method)
+    ) {
+      messages.push(error.value.errorMessage);
+    }
+    if (isAcpProcessExitedError(error.value)) {
+      const stderr = error.value.stderr?.trim();
+      if (stderr) {
+        messages.push(stderr);
+      }
+    }
+  }
+  return messages;
+}
+
+/**
  * Splits "Cline is not signed in" from "Cline is broken" so Settings can offer
- * `cline auth` instead of a support ticket.
+ * `cline auth` instead of a support ticket. See
+ * {@link clineAuthCandidateMessages} for the shapes this recognizes.
  *
- * Two shapes have to be recognized, and only the first carries a method:
- *
- * - A typed `AcpRequestError` on a session-setup method. The method and the
- *   `-32000` code both have to line up: `-32000` is a generic ACP code, so an
- *   unrelated one must not be read as a sign-in problem.
- * - A thrown defect. The real CLI's guard arrives this way — the ACP error
- *   carries a `cause` the generated schema cannot decode, so decoding the error
- *   throws and the typed error is lost on the way out. The message is then the
- *   only signal left, so it is paired with an explicit refusal to match
- *   anything that reads like a startup failure.
+ * The startup guard is applied to every shape, not just the ones that carry
+ * only a message: a broken `PATH` can also mention the API key, and that CLI
+ * still needs installing rather than signing in.
  */
 export function classifyClineAuthFailure(
   cause: Cause.Cause<EffectAcpErrors.AcpError>,
 ): ClineDiscoveryFailure {
-  const error = Cause.findErrorOption(cause);
   if (
-    Option.isSome(error) &&
-    isAcpRequestError(error.value) &&
-    error.value.code === -32000 &&
-    error.value.method !== undefined &&
-    CLINE_SESSION_SETUP_METHODS.has(error.value.method) &&
-    CLINE_AUTH_REQUIRED_MESSAGE.test(error.value.errorMessage)
-  ) {
-    return { kind: "unauthenticated" };
-  }
-  const messages = defectMessages(cause);
-  if (
-    messages.some(
+    clineAuthCandidateMessages(cause).some(
       (message) =>
         CLINE_AUTH_REQUIRED_MESSAGE.test(message) && !CLINE_STARTUP_FAILURE_MESSAGE.test(message),
     )

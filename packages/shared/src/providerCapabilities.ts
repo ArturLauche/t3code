@@ -5,7 +5,8 @@
  * approve-everything tool policy, no image ingest, no mid-session mode switch.
  * The server declares that on the `ServerProvider` snapshot
  * (`supportedRuntimeModes`, `supportsImageAttachments`,
- * `showInteractionModeToggle`), and these helpers are the one place clients ask
+ * `supportsFileAttachments`, `showInteractionModeToggle`), and these helpers are
+ * the one place clients ask
  * what that means. Keeping them here is the point: a provider-shaped branch in a
  * composer is how capability work turns into scattered `driver === "..."` checks
  * that drift between surfaces.
@@ -22,6 +23,7 @@ export type ProviderCapabilitySnapshot = Pick<
   | "supportedRuntimeModes"
   | "showInteractionModeToggle"
   | "supportsImageAttachments"
+  | "supportsFileAttachments"
 >;
 
 /** The narrowest shape the mode helpers need, for callers holding only a list. */
@@ -30,13 +32,26 @@ export type RuntimeModeCapabilitySnapshot = Pick<
   "supportedRuntimeModes"
 >;
 
-/** Every access mode, in the order the access-mode picker lists them. */
-export const ALL_RUNTIME_MODES: ReadonlyArray<RuntimeMode> = [
+/**
+ * Every access mode, in the order the access-mode picker lists them.
+ *
+ * The `AssertNever` alias below is what keeps this list honest: adding a mode to
+ * the contract without listing it here fails to compile, instead of quietly
+ * leaving the new mode unavailable on every provider that has not narrowed its
+ * own set.
+ */
+const RUNTIME_MODE_ORDER = [
   "approval-required",
   "auto-accept-edits",
   "auto",
   "full-access",
-];
+] as const satisfies ReadonlyArray<RuntimeMode>;
+type AssertNever<T extends never> = T;
+type _AllRuntimeModesListed = AssertNever<
+  Exclude<RuntimeMode, (typeof RUNTIME_MODE_ORDER)[number]>
+>;
+
+export const ALL_RUNTIME_MODES: ReadonlyArray<RuntimeMode> = RUNTIME_MODE_ORDER;
 
 export const RUNTIME_MODE_LABELS: Readonly<Record<RuntimeMode, string>> = {
   "approval-required": "Supervised",
@@ -68,12 +83,17 @@ export function providerSupportsRuntimeMode(
 }
 
 /**
- * The mode the picker should steer toward: the widest grant the provider
- * actually supports, else the narrowest one it lists.
+ * The mode the picker should steer toward: the tightest grant the provider can
+ * actually enforce.
+ *
+ * Deliberately the narrowest, not the widest. Pointing a user at Full access to
+ * unblock a send would widen the grant to make the error go away, which is the
+ * opposite of what an unsupported-mode warning is for.
  */
-function suggestedRuntimeMode(supported: ReadonlyArray<RuntimeMode>): RuntimeMode | undefined {
-  if (supported.includes("full-access")) return "full-access";
-  return supported[0];
+function narrowestRuntimeMode(supported: ReadonlyArray<RuntimeMode>): RuntimeMode | undefined {
+  // `ALL_RUNTIME_MODES` runs narrowest-first, so the first supported entry is
+  // the tightest one available.
+  return ALL_RUNTIME_MODES.find((mode) => supported.includes(mode));
 }
 
 function unsupportedRuntimeModeReason(
@@ -81,7 +101,7 @@ function unsupportedRuntimeModeReason(
   supported: ReadonlyArray<RuntimeMode>,
 ): string {
   const label = providerLabel(provider);
-  const suggestion = suggestedRuntimeMode(supported);
+  const suggestion = narrowestRuntimeMode(supported);
   if (!suggestion) {
     return `${label} does not declare any supported access mode. Re-check the provider in Settings.`;
   }
@@ -112,10 +132,10 @@ export function getUnsupportedProviderModeReason(input: {
 }): string | null {
   const { provider, runtimeMode, interactionMode } = input;
   if (!provider) return null;
+  // Never empty: an absent or empty declaration means "all of them". The
+  // no-modes-declared case therefore cannot be reached here, and the composer
+  // always has at least one access mode to steer toward.
   const supported = getProviderSupportedRuntimeModes(provider);
-  if (supported.length === 0) {
-    return unsupportedRuntimeModeReason(provider, supported);
-  }
   if (!supported.includes(runtimeMode)) {
     return unsupportedRuntimeModeReason(provider, supported);
   }
@@ -131,13 +151,44 @@ export function providerSupportsImageAttachments(
   return provider?.supportsImageAttachments !== false;
 }
 
+/**
+ * Files are a separate question from images: a provider can take a file and
+ * still drop an image, so the two flags are never inferred from each other.
+ */
+export function providerSupportsFileAttachments(
+  provider: ProviderCapabilitySnapshot | null | undefined,
+): boolean {
+  return provider?.supportsFileAttachments !== false;
+}
+
+/**
+ * The reason the composed attachments cannot be sent, or `null`.
+ *
+ * Counts are separate so the message names what the user actually has to
+ * remove. Reporting "images" for a file-only draft would send the user looking
+ * for an image they never attached.
+ */
 export function getUnsupportedProviderAttachmentReason(input: {
   readonly provider: ProviderCapabilitySnapshot | null | undefined;
   readonly attachmentCount: number;
+  readonly fileCount?: number;
 }): string | null {
+  const imageCount = Math.max(0, input.attachmentCount - (input.fileCount ?? 0));
   if (input.attachmentCount === 0) return null;
-  if (providerSupportsImageAttachments(input.provider)) return null;
-  return `${providerLabel(input.provider)} does not support image attachments. Remove the images to continue.`;
+  const label = providerLabel(input.provider);
+  const imagesUnsupported = imageCount > 0 && !providerSupportsImageAttachments(input.provider);
+  const filesUnsupported =
+    (input.fileCount ?? 0) > 0 && !providerSupportsFileAttachments(input.provider);
+  if (imagesUnsupported && filesUnsupported) {
+    return `${label} does not support attachments. Remove them to continue.`;
+  }
+  if (filesUnsupported) {
+    return `${label} does not support file attachments. Remove the files to continue.`;
+  }
+  if (imagesUnsupported) {
+    return `${label} does not support image attachments. Remove the images to continue.`;
+  }
+  return null;
 }
 
 export type UnsupportedProviderInputKind = "mode" | "attachment";
@@ -148,6 +199,7 @@ export function getUnsupportedProviderInputReason(input: {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode | undefined;
   readonly attachmentCount: number;
+  readonly fileCount?: number;
 }): { readonly kind: UnsupportedProviderInputKind; readonly reason: string } | null {
   const modeReason = getUnsupportedProviderModeReason(input);
   if (modeReason !== null) return { kind: "mode", reason: modeReason };

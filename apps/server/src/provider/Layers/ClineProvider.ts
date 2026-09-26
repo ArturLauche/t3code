@@ -44,6 +44,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 
 /**
  * Cline's model catalog is a few hundred entries, so a probe that has to build
@@ -55,8 +56,26 @@ const ACP_DISCOVERY_TIMEOUT_MS = 20_000;
 const PROBE_FORCE_KILL_AFTER = "1 second" as const;
 /** Ceiling on the kill itself, so teardown is bounded even against a wedged peer. */
 const PROBE_TERMINATE_TIMEOUT_MS = 2_000;
-const NOT_INSTALLED_HINT = "Install it with `npm install -g cline`.";
-const UNAUTHENTICATED_HINT = "Cline CLI is installed but not signed in. Run `cline auth`.";
+const CLINE_DEFAULT_COMMAND = "cline";
+
+/**
+ * Hints follow the command that is actually configured. A custom `binaryPath`
+ * makes the stock install advice and the stock `cline auth` advice wrong, and
+ * the user is the only one who knows what that path is.
+ */
+const configuredCommand = (clineSettings: ClineSettings) =>
+  clineSettings.binaryPath?.trim() || CLINE_DEFAULT_COMMAND;
+
+const notInstalledHint = (clineSettings: ClineSettings) => {
+  const command = configuredCommand(clineSettings);
+  return command === CLINE_DEFAULT_COMMAND
+    ? "Install it with `npm install -g cline`."
+    : "Set a binary path that exists in Settings.";
+};
+
+const unauthenticatedHint = (clineSettings: ClineSettings) =>
+  `Cline CLI is installed but not signed in. Run \`${configuredCommand(clineSettings)} auth\`.`;
+
 const EMPTY_CATALOG_HINT =
   "Cline is signed in but did not advertise any usable models. Configure a provider and model in Cline, then re-check.";
 
@@ -73,8 +92,11 @@ export const CLINE_PRESENTATION = {
   supportsTextGeneration: false,
   showInteractionModeToggle: false,
   // Cline's CLI advertises image prompts but discards every non-text block
-  // before dispatch, so a sent image would vanish without a trace.
+  // before dispatch, so a sent image or file would vanish without a trace.
+  // The two are declared apart because they are separate questions, even
+  // though this build answers no to both.
   supportsImageAttachments: false,
+  supportsFileAttachments: false,
   supportedRuntimeModes: CLINE_SUPPORTED_RUNTIME_MODES as ReadonlyArray<RuntimeMode>,
 } as const;
 
@@ -160,7 +182,13 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
     // so scope close would wait on a peer that will never speak again. Observe
     // startup as data and kill the exact child this probe owns when the
     // deadline passes.
-    const startFiber = yield* acp.start().pipe(Effect.forkDetach);
+    //
+    // Forked into this probe's scope rather than detached: the timeout path
+    // terminates the child first, and the scope close that follows is what
+    // releases the fiber. A detached fiber would outlive the probe, so a kill
+    // that fails leaks a fiber and its runtime for the life of the server, once
+    // per status refresh.
+    const startFiber = yield* acp.start().pipe(Effect.forkScoped);
     // Race rather than time out: `Effect.timeoutOption` interrupts the awaited
     // fiber, and interrupting a startup that is parked on an unanswered
     // JSON-RPC request tears the runtime down against a peer that will never
@@ -208,7 +236,7 @@ const runClineCliCommand = (
   environment: NodeJS.ProcessEnv | undefined,
 ) =>
   Effect.gen(function* () {
-    const command = clineSettings.binaryPath || "cline";
+    const command = expandHomePath(configuredCommand(clineSettings));
     const spawnCommand = yield* resolveSpawnCommand(
       command,
       args,
@@ -250,7 +278,7 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
         status: "error",
         auth: { status: "unknown" },
         message: isCommandMissingCause(error)
-          ? `Cline CLI (\`cline\`) is not installed or not on PATH. ${NOT_INSTALLED_HINT}`
+          ? `Cline CLI (\`${configuredCommand(clineSettings)}\`) is not installed or not on PATH. ${notInstalledHint(clineSettings)}`
           : "Failed to execute the Cline CLI health check.",
       },
     });
@@ -299,11 +327,21 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
     environment,
     ACP_DISCOVERY_TIMEOUT_MS,
   ).pipe(Effect.exit);
-  const discovery = Exit.isSuccess(discoveryExit) ? discoveryExit.value : undefined;
-
-  if (!discovery) {
-    yield* Effect.logWarning("Cline ACP model discovery timed out.", {
+  // `Effect.exit` also captures interruptions, and a probe cancelled because
+  // its scope closed has not learned anything about Cline. Re-interrupt instead
+  // of reporting a timeout Cline never caused; discovery reports its own
+  // deadline as a `Timeout` result, so a plain failure here is a real error.
+  if (Exit.isFailure(discoveryExit)) {
+    // `Cause.hasInterrupts` rather than `Exit.hasInterrupts`: the latter is
+    // typed as refining to the whole `Failure` variant, so its false branch
+    // narrows to `never`.
+    if (Cause.hasInterrupts(discoveryExit.cause)) {
+      return yield* Effect.interrupt;
+    }
+    const errorTag = causeErrorTag(discoveryExit.cause);
+    yield* Effect.logWarning("Cline ACP model discovery failed.", {
       timeoutMs: ACP_DISCOVERY_TIMEOUT_MS,
+      errorTag,
     });
     return buildServerProvider({
       presentation: CLINE_PRESENTATION,
@@ -315,10 +353,11 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
         version,
         status: "error",
         auth: { status: "unknown" },
-        message: "Cline CLI is installed but ACP startup timed out. Check server logs for details.",
+        message: `Cline CLI is installed but its ACP session could not be verified (${errorTag}). Check server logs for details.`,
       },
     });
   }
+  const discovery = discoveryExit.value;
 
   if (discovery.kind === "unauthenticated") {
     return buildServerProvider({
@@ -331,7 +370,7 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
         version,
         status: "warning",
         auth: { status: "unauthenticated" } satisfies ServerProviderAuth,
-        message: UNAUTHENTICATED_HINT,
+        message: unauthenticatedHint(clineSettings),
       },
     });
   }

@@ -80,6 +80,7 @@ import {
   getProviderSupportedRuntimeModes,
   getUnsupportedProviderAttachmentReason,
   getUnsupportedProviderInputReason,
+  providerSupportsFileAttachments,
   providerSupportsImageAttachments,
 } from "@t3tools/shared/providerCapabilities";
 import {
@@ -430,7 +431,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     provider: selectedProviderStatus,
     runtimeMode: currentRuntimeMode,
     interactionMode: props.selectedThread.interactionMode,
-    attachmentCount: props.draftAttachments.filter(isComposerImageAttachment).length,
+    // Counted apart so the message names the kind actually attached.
+    attachmentCount: props.draftAttachments.length,
+    fileCount: props.draftAttachments.filter((attachment) => !isComposerImageAttachment(attachment))
+      .length,
   });
   const sendBlockedReason =
     props.sendBlockedReason ??
@@ -721,9 +725,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           >
             {!isExpanded ? (
               <ComposerAttachmentButton
-                supportsFiles={Boolean(
-                  props.serverConfig?.environment.capabilities.fileAttachments,
-                )}
+                supportsFiles={
+                  Boolean(props.serverConfig?.environment.capabilities.fileAttachments) &&
+                  providerSupportsFileAttachments(selectedProviderStatus)
+                }
                 supportsImages={providerSupportsImageAttachments(selectedProviderStatus)}
                 onPickMedia={props.onPickDraftMedia}
                 onPickFiles={props.onPickDraftFiles}
@@ -985,9 +990,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 ) : (
                   <View className="min-w-0 flex-1 flex-row items-center justify-between">
                     <ComposerAttachmentButton
-                      supportsFiles={Boolean(
-                        props.serverConfig?.environment.capabilities.fileAttachments,
-                      )}
+                      supportsFiles={
+                        Boolean(props.serverConfig?.environment.capabilities.fileAttachments) &&
+                        providerSupportsFileAttachments(selectedProviderStatus)
+                      }
                       supportsImages={providerSupportsImageAttachments(selectedProviderStatus)}
                       onPickMedia={props.onPickDraftMedia}
                       onPickFiles={props.onPickDraftFiles}

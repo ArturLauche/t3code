@@ -24,6 +24,7 @@ const requireAuthentication = process.env.T3_ACP_REQUIRE_AUTHENTICATION === "1";
 const ignoreSigterm = process.env.T3_ACP_IGNORE_SIGTERM === "1";
 const hangInitializeForever = process.env.T3_ACP_HANG_INITIALIZE_FOREVER === "1";
 const hangCreateSessionForever = process.env.T3_ACP_HANG_CREATE_SESSION_FOREVER === "1";
+const hangSetConfigOption = process.env.T3_ACP_HANG_SET_CONFIG_OPTION === "1";
 const emptyModelCatalog = process.env.T3_ACP_EMPTY_MODEL_CATALOG === "1";
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
@@ -120,6 +121,11 @@ function logExit(reason: string): void {
   }
   NodeFS.appendFileSync(exitLogPath, `${reason}\n`, "utf8");
 }
+
+// Recorded so a test can prove the process is really gone. A SIGKILL cannot be
+// logged from inside the process, so the exit log alone cannot distinguish
+// "escalated" from "still running".
+logExit(`pid:${process.pid}`);
 
 function writeJsonRpcNotification(method: string, params: unknown): void {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
@@ -723,6 +729,11 @@ const program = Effect.gen(function* () {
         return yield* Effect.sync(() => {
           process.exit(7);
         });
+      }
+      if (hangSetConfigOption) {
+        // Stalls the pre-prompt window, so a Stop lands while sendTurn is still
+        // configuring the session rather than once the prompt is in flight.
+        return yield* Effect.never;
       }
       if (failSetConfigOption) {
         return yield* AcpError.AcpRequestError.invalidParams(

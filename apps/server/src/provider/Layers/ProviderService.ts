@@ -948,7 +948,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     Effect.gen(function* () {
       // An agent that ignores the session's `mcpServers` would leave the
       // credential unused, so don't mint one for it.
+      //
+      // The credential a previous MCP-consuming provider issued for this thread
+      // still has to go: `issueActiveMcpCredential` revokes the old one as a
+      // side effect of minting a new one, so returning early would leave that
+      // credential registered and refreshed by the per-turn `touch` for a
+      // session that can never use it.
       if (adapter.capabilities.consumesMcpServers === false) {
+        yield* clearMcpSession(threadId);
         return undefined;
       }
       const capabilities = yield* agentAccessCapabilities(threadId);

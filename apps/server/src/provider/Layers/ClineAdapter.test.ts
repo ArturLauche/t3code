@@ -377,6 +377,18 @@ clineAdapterTestLayer("ClineAdapterLive", (it) => {
           env: { T3_ACP_REQUEST_LOG_PATH: requestLogPath },
         });
         yield* settings.updateSettings({ providers: { cline: { binaryPath } } });
+        // Collected per event: `runCollect` returns nothing when interrupted,
+        // which is exactly the state this test inspects.
+        const events: ProviderRuntimeEvent[] = [];
+        const collector = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              events.push(event);
+            }),
+          ),
+          Effect.forkChild,
+        );
+        // Subscribed before the session starts, so the collector sees it come up.
         yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
 
         const attachmentError = yield* adapter
@@ -414,6 +426,96 @@ clineAdapterTestLayer("ClineAdapterLive", (it) => {
         assert.isFalse(logged.includes('"session/prompt"'));
         // No turn was reserved, so the session is still idle.
         assert.deepStrictEqual(yield* adapter.readThread(threadId), { threadId, turns: [] });
+        // And no terminal event names a turn that never started. Ingestion
+        // accepts a named completion for a turn it never saw start, so one here
+        // would persist a phantom failed turn on top of the failure activity
+        // the command reactor already appends.
+        yield* Effect.sleep(200).pipe(TestClock.withLive);
+        yield* Fiber.interrupt(collector);
+        // Guard against a vacuous pass: the collector must have seen the
+        // session come up, or "no terminal event" proves nothing.
+        assert.isTrue(
+          events.some((event) => event.type === "session.started"),
+          events.map((event) => event.type).join(","),
+        );
+        assert.isFalse(
+          events.some((event) => event.type === "turn.completed" || event.type === "turn.aborted"),
+          events.map((event) => event.type).join(","),
+        );
+        yield* adapter.stopSession(threadId);
+      }),
+    ),
+  );
+
+  it.effect("honours a Stop that lands before the prompt is sent", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* ClineAdapter;
+        const settings = yield* ServerSettingsService;
+        const threadId = ThreadId.make("cline-cancel-preprompt");
+        const requestLogPath = yield* scopedTempPath("t3code-cline-preprompt-", "requests.ndjson");
+        const binaryPath = yield* writeFakeClineCli({
+          env: {
+            T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+            // Stalls the model/mode configuration sendTurn does before
+            // prompting, which is the window `session/cancel` cannot reach.
+            T3_ACP_HANG_SET_CONFIG_OPTION: "1",
+          },
+        });
+        yield* settings.updateSettings({ providers: { cline: { binaryPath } } });
+        // Collected per event rather than with `runCollect`: a collector that
+        // only returns at stream end has nothing to show after an interrupt.
+        const events: ProviderRuntimeEvent[] = [];
+        const collector = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              events.push(event);
+            }),
+          ),
+          Effect.forkChild,
+        );
+        // Subscribed before the session starts: the event stream is live, not
+        // replayed, so a later subscriber misses `session.started`.
+        yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+        const turn = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "never dispatched",
+            attachments: [],
+            // A model the session is not already on, so sendTurn really does send
+            // `session/set_config_option` and stalls inside the window.
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("cline"),
+              model: "qwen/qwen3.8-max-prime",
+            },
+          })
+          .pipe(Effect.forkChild);
+        // Let the stalled configuration RPC start before cancelling.
+        yield* Effect.sleep(300).pipe(TestClock.withLive);
+        const interrupted = yield* adapter.interruptTurn(threadId).pipe(TestClock.withLive);
+        yield* Effect.sleep(300).pipe(TestClock.withLive);
+        // The turn gives up rather than prompting after the user stopped it.
+        yield* Fiber.interrupt(turn).pipe(TestClock.withLive);
+        yield* Effect.sleep(200).pipe(TestClock.withLive);
+        yield* Fiber.interrupt(collector);
+        assert.isUndefined(interrupted);
+        // Guard against a vacuous pass: the collector must have seen the session
+        // come up, or "no terminal event" proves nothing.
+        assert.isTrue(
+          events.some((event) => event.type === "session.started"),
+          events.map((event) => event.type).join(","),
+        );
+
+        // The prompt never reached the agent, which is the whole point.
+        const logged = yield* readFileIfPresent(requestLogPath);
+        assert.isTrue(logged.includes('"session/set_config_option"'));
+        assert.isFalse(logged.includes('"session/prompt"'));
+        // No turn was ever started, so nothing claims one completed.
+        assert.deepStrictEqual(yield* adapter.readThread(threadId), { threadId, turns: [] });
+        assert.isFalse(
+          events.some((event) => event.type === "turn.completed" || event.type === "turn.aborted"),
+          events.map((event) => event.type).join(","),
+        );
         yield* adapter.stopSession(threadId);
       }),
     ),
@@ -534,6 +636,46 @@ clineAdapterTestLayer("ClineAdapterLive", (it) => {
         const logged = yield* readFileIfPresent(requestLogPath);
         // Cline implements `session/load` only; `session/resume` is -32601.
         assert.isTrue(logged.includes('"session/load"'));
+      }),
+    ),
+  );
+
+  it.effect("retires a session when the Cline process dies mid-session", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* ClineAdapter;
+        const settings = yield* ServerSettingsService;
+        const threadId = ThreadId.make("cline-connection-lost");
+        const binaryPath = yield* writeFakeClineCli({
+          // Kills the child the first time the adapter configures the model,
+          // i.e. after the session is up and a turn is in flight.
+          env: { T3_ACP_EXIT_ON_SET_CONFIG_OPTION: "1" },
+        });
+        yield* settings.updateSettings({ providers: { cline: { binaryPath } } });
+        yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+        assert.isTrue(yield* adapter.hasSession(threadId));
+
+        const instanceId = ProviderInstanceId.make("cline");
+        const failed = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "dies before the prompt",
+            attachments: [],
+            modelSelection: { instanceId, model: "qwen/qwen3.8-max-prime" },
+          })
+          .pipe(Effect.flip, TestClock.withLive);
+        assert.isDefined(failed);
+
+        // A dead connection must not keep reporting a ready session: every later
+        // turn would be sent to a process that is gone. Retiring it runs on the
+        // notification fiber, so poll rather than assume it has landed.
+        let stillRegistered = true;
+        for (let attempt = 0; attempt < 50 && stillRegistered; attempt += 1) {
+          yield* Effect.sleep(100).pipe(TestClock.withLive);
+          stillRegistered = yield* adapter.hasSession(threadId);
+        }
+        assert.isFalse(stillRegistered);
+        assert.deepStrictEqual(yield* adapter.listSessions(), []);
       }),
     ),
   );
@@ -688,31 +830,41 @@ clineAdapterTestLayer("ClineAdapterLive", (it) => {
   );
 
   it.effect("stops every session when the adapter shuts down", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const adapter = yield* ClineAdapter;
-        const settings = yield* ServerSettingsService;
-        const exitLogPath = yield* scopedTempPath("t3code-cline-stopall-", "exit.log");
-        const binaryPath = yield* writeFakeClineCli({ env: { T3_ACP_EXIT_LOG_PATH: exitLogPath } });
-        yield* settings.updateSettings({ providers: { cline: { binaryPath } } });
-        const first = ThreadId.make("cline-stopall-a");
-        const second = ThreadId.make("cline-stopall-b");
-        yield* adapter.startSession({
-          threadId: first,
-          cwd: process.cwd(),
-          runtimeMode: "full-access",
-        });
-        yield* adapter.startSession({
-          threadId: second,
-          cwd: process.cwd(),
-          runtimeMode: "full-access",
-        });
-        const active = new Set((yield* adapter.listSessions()).map((session) => session.threadId));
-        assert.isTrue(active.has(first));
-        assert.isTrue(active.has(second));
-        // The scope closes at the end of this effect, which is the server
-        // shutdown path; both Cline children have to go with it.
-      }),
-    ),
+    Effect.gen(function* () {
+      const exitLogPath = yield* scopedTempPath("t3code-cline-stopall-", "exit.log");
+      const binaryPath = yield* writeFakeClineCli({ env: { T3_ACP_EXIT_LOG_PATH: exitLogPath } });
+      const settings = yield* ServerSettingsService;
+      yield* settings.updateSettings({ providers: { cline: { binaryPath } } });
+      const resolveSettings = yield* makeResolveClineSettings;
+      // Scoped here rather than taken from the shared test layer: the claim
+      // under test is what happens when the adapter's scope closes, and the
+      // layer's scope outlives the test body.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const adapter = yield* makeClineAdapter(decodeClineSettings({}), { resolveSettings });
+          const first = ThreadId.make("cline-stopall-a");
+          const second = ThreadId.make("cline-stopall-b");
+          yield* adapter.startSession({
+            threadId: first,
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+          });
+          yield* adapter.startSession({
+            threadId: second,
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+          });
+          const active = new Set(
+            (yield* adapter.listSessions()).map((session) => session.threadId),
+          );
+          assert.isTrue(active.has(first));
+          assert.isTrue(active.has(second));
+        }),
+      );
+      // Closing that scope is the server shutdown path: both Cline children have
+      // to go with it, or each surviving one shows up as a missing exit.
+      const exitLog = yield* readFileIfPresent(exitLogPath);
+      assert.strictEqual(exitLog.split("exit:").length - 1, 2, exitLog);
+    }),
   );
 });

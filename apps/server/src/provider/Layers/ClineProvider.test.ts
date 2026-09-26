@@ -46,6 +46,20 @@ const writeFakeClineCli = (input?: {
     });
   });
 
+/**
+ * Whether a pid is still running. Signal 0 performs the permission and
+ * existence check without delivering anything, so a child that is gone reports
+ * ESRCH instead of being probed.
+ */
+const isProcessAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
 const readFileIfPresent = (filePath: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -78,7 +92,7 @@ checkLayer("checkClineProviderStatus", (it) => {
     }),
   );
 
-  it.effect("reports a missing CLI and how to install it", () =>
+  it.effect("reports a missing custom binary without stock install advice", () =>
     Effect.gen(function* () {
       const snapshot = yield* checkClineProviderStatus(
         decodeClineSettings({ enabled: true, binaryPath: "/definitely/missing/cline" }),
@@ -86,8 +100,33 @@ checkLayer("checkClineProviderStatus", (it) => {
       );
       assert.isFalse(snapshot.installed);
       assert.strictEqual(snapshot.status, "error");
-      assert.match(snapshot.message ?? "", /not installed or not on PATH.*npm install -g cline/s);
+      const message = snapshot.message ?? "";
+      assert.match(message, /not installed or not on PATH/);
+      // The configured path is what is missing, so `npm install -g cline` would
+      // send the user after a package they never configured.
+      assert.match(message, /definitely\/missing\/cline/);
+      assert.notMatch(message, /npm install -g cline/);
     }),
+  );
+
+  it.effect("tells an unauthenticated custom binary to authenticate that binary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const binaryPath = yield* writeFakeClineCli({
+          env: { T3_ACP_REQUIRE_AUTHENTICATION: "1" },
+        });
+        const snapshot = yield* checkClineProviderStatus(
+          decodeClineSettings({ enabled: true, binaryPath }),
+          {},
+        );
+        assert.strictEqual(snapshot.status, "warning");
+        // The instruction has to name the command the user configured.
+        assert.strictEqual(
+          snapshot.message,
+          `Cline CLI is installed but not signed in. Run \`${binaryPath} auth\`.`,
+        );
+      }),
+    ),
   );
 
   it.effect("detects the installed CLI, its version and its model catalog", () =>
@@ -125,10 +164,8 @@ checkLayer("checkClineProviderStatus", (it) => {
         assert.isTrue(snapshot.installed);
         assert.strictEqual(snapshot.status, "warning");
         assert.deepStrictEqual(snapshot.auth, { status: "unauthenticated" });
-        assert.strictEqual(
-          snapshot.message,
-          "Cline CLI is installed but not signed in. Run `cline auth`.",
-        );
+        // No configured path, so the stock command is the one to authenticate.
+        assert.match(snapshot.message ?? "", /not signed in\. Run `.*cline auth`\./);
         // An unauthenticated CLI has no usable catalog, so no model is invented.
         assert.deepStrictEqual(snapshot.models, []);
       }),
@@ -175,7 +212,14 @@ checkLayer("checkClineProviderStatus", (it) => {
         assert.match(snapshot.message ?? "", /ACP startup/);
         assert.deepStrictEqual(snapshot.models, []);
         // The child this probe owned was terminated rather than left running.
-        assert.match(yield* readFileIfPresent(exitLogPath), /SIGTERM/);
+        // The mock ignores SIGTERM and a SIGKILL cannot be logged from inside
+        // the process, so the log proves only that the grace path was tried;
+        // the pid proves the escalation actually removed the child.
+        const exitLog = yield* readFileIfPresent(exitLogPath);
+        assert.match(exitLog, /SIGTERM/);
+        const pid = Number(/pid:(\d+)/.exec(exitLog)?.[1]);
+        assert.isTrue(Number.isInteger(pid), exitLog);
+        assert.isFalse(isProcessAlive(pid), `probe child ${pid} survived the force-kill`);
       }),
     ).pipe(TestClock.withLive),
   );
