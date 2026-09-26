@@ -1,5 +1,6 @@
 import {
   AntigravitySettings,
+  ClineSettings,
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
@@ -12,6 +13,7 @@ import type * as Schema from "effect/Schema";
 import {
   AntigravityIcon,
   ClaudeAI,
+  ClineIcon,
   CursorIcon,
   FreebuffIcon,
   GrokIcon,
@@ -69,6 +71,14 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
     supportsCloudExecution: true,
+  },
+  {
+    value: ProviderDriverKind.make("cline"),
+    label: "Cline",
+    icon: ClineIcon,
+    badgeLabel: "Early Access",
+    settingsSchema: ClineSettings,
+    supportsCloudExecution: false,
   },
   {
     value: ProviderDriverKind.make("freebuff"),

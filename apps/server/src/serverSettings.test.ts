@@ -1116,6 +1116,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
           },
+          cline: {
+            // Opt-in like cursor, freebuff, grok and opencode, so an explicit
+            // opt-out has to survive the round trip to disk.
+            enabled: false,
+          },
           cursor: {
             enabled: false,
           },

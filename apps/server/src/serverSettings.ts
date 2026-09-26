@@ -393,6 +393,7 @@ const PERSISTED_SERVER_SETTINGS_DEFAULTS = {
   ...DEFAULT_SERVER_SETTINGS,
   providers: {
     ...DEFAULT_SERVER_SETTINGS.providers,
+    cline: { ...DEFAULT_SERVER_SETTINGS.providers.cline, enabled: undefined },
     cursor: { ...DEFAULT_SERVER_SETTINGS.providers.cursor, enabled: undefined },
     freebuff: { ...DEFAULT_SERVER_SETTINGS.providers.freebuff, enabled: undefined },
     grok: { ...DEFAULT_SERVER_SETTINGS.providers.grok, enabled: undefined },
