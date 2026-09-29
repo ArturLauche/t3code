@@ -283,6 +283,12 @@ export default defineConfig({
         rules: { "shadcn/no-arbitrary-values": "off" },
       },
       {
+        // Same reasoning for the third-party marks that are stroked rather than
+        // filled: a brand stroke is part of the logo, so it keeps its exact color.
+        files: ["apps/web/src/components/Icons.tsx", "apps/web/src/components/JetBrainsIcons.tsx"],
+        rules: { "shadcn/no-arbitrary-values": "off" },
+      },
+      {
         // Shared client code must not call APIs missing from Hermes. Our ESNext
         // TypeScript target accepts them even when they would crash mobile at launch.
         // Tests run on Node and are exempt.

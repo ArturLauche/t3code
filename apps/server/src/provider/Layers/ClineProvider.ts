@@ -81,7 +81,7 @@ const EMPTY_CATALOG_HINT =
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({ optionDescriptors: [] });
 
-export const CLINE_PRESENTATION = {
+const CLINE_PRESENTATION = {
   displayName: "Cline",
   badgeLabel: "Early Access",
   // Cline's ACP build hard-disables reasoning, so no thinking level is offered.
@@ -130,7 +130,7 @@ export function buildInitialClineProviderSnapshot(
 }
 
 /** Cline's advertised models, shaped for the T3 model picker. */
-export function clineModelsFromSetup(
+function clineModelsFromSetup(
   sessionSetupResult: AcpSessionSetupResponse,
 ): ReadonlyArray<ServerProviderModel> {
   return clineModelsFromSessionSetup(sessionSetupResult).map((model) => ({

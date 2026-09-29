@@ -112,14 +112,6 @@ function planUnsupportedReason(provider: ProviderCapabilitySnapshot): string {
   return `${providerLabel(provider)} does not support Plan mode. Choose Build to continue.`;
 }
 
-export function providerShowsInteractionModeToggle(
-  provider: ProviderCapabilitySnapshot | null | undefined,
-  interactionMode: ProviderInteractionMode | undefined,
-): boolean {
-  if (interactionMode === "plan") return true;
-  return provider?.showInteractionModeToggle !== false;
-}
-
 /**
  * The reason a turn cannot be sent as composed, or `null` when it can.
  * Access mode wins over Plan, which wins over attachments, so the message names
