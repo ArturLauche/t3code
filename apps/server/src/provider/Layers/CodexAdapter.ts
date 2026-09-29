@@ -22,6 +22,7 @@ import {
   type ToolActivityNativeAppReference,
   type ToolActivitySource,
   type ProviderUserInputAnswers,
+  type ServerProviderModel,
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
@@ -91,6 +92,8 @@ export interface CodexAdapterLiveOptions {
   readonly childProcessSpawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly remoteCwdFor?: CloudRemoteCwdResolver;
   readonly environment?: NodeJS.ProcessEnv;
+  /** The provider's model list; supplies model display names for runtime info. */
+  readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
   readonly makeRuntime?: (
     options: CodexSessionRuntimeOptions,
   ) => Effect.Effect<
@@ -2283,6 +2286,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           cwd: localCwd,
           ...(protocolCwd ? { protocolCwd } : {}),
           binaryPath: codexConfig.binaryPath,
+          ...(options?.models ? { models: options.models } : {}),
           launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),

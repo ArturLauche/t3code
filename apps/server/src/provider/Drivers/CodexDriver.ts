@@ -39,10 +39,7 @@ import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts"
 import { makeCloudExecutionSpawner } from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
-import {
-  CODEX_RESET_CREDIT_TIMEOUT,
-  CodexResetCreditCoordinator,
-} from "../Layers/codexResetCredit.ts";
+import * as ResetCreditCoordinator from "../Layers/resetCreditCoordinator.ts";
 import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
@@ -108,7 +105,7 @@ function makeCodexMaintenanceResolver(sharedHomePath: string) {
 export type CodexDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
-  | CodexResetCreditCoordinator
+  | ResetCreditCoordinator.ResetCreditCoordinator
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
@@ -139,7 +136,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const cloudRuntime = yield* CloudRuntimeService;
-      const resetCreditCoordinator = yield* CodexResetCreditCoordinator;
+      const resetCreditCoordinator = yield* ResetCreditCoordinator.ResetCreditCoordinator;
       const fileSystem = yield* FileSystem.FileSystem;
       const pathService = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
@@ -200,24 +197,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         ),
       );
 
-      // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
-      // channels at construction time — their failure modes are all on the
-      // per-operation closures they return. No `mapError` wrapper is needed
-      // here; the registry only has to worry about snapshot-build and
-      // spawner-availability failures surfaced from `checkCodexProviderStatus`
-      // below.
-      const adapter = yield* makeCodexAdapter(effectiveConfig, {
-        instanceId,
-        ...(cloudTransport
-          ? {
-              childProcessSpawner: cloudTransport.spawner,
-              remoteCwdFor: cloudTransport.remoteCwdFor,
-            }
-          : {}),
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-      });
-
       // Build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
@@ -272,10 +251,29 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             }),
         ),
       );
+      const models = snapshot.getSnapshot.pipe(Effect.map((value) => value.models));
+      // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
+      // channels at construction time — their failure modes are all on the
+      // per-operation closures they return. No `mapError` wrapper is needed
+      // here; the registry only has to worry about snapshot-build and
+      // spawner-availability failures surfaced from `checkCodexProviderStatus`
+      // above.
+      const adapter = yield* makeCodexAdapter(effectiveConfig, {
+        instanceId,
+        ...(cloudTransport
+          ? {
+              childProcessSpawner: cloudTransport.spawner,
+              remoteCwdFor: cloudTransport.remoteCwdFor,
+            }
+          : {}),
+        environment: processEnv,
+        models,
+        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      });
       const textGeneration = yield* makeCodexTextGeneration(
         effectiveConfig,
         processEnv,
-        snapshot.getSnapshot.pipe(Effect.map((value) => value.models)),
+        models,
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner));
       const snapshotForCwd = (cwd: string) =>
         !effectiveConfig.enabled
@@ -330,7 +328,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                 idempotencyKey,
               });
               return response.outcome;
-            }).pipe(Effect.scoped, Effect.timeout(CODEX_RESET_CREDIT_TIMEOUT)),
+            }).pipe(Effect.scoped, Effect.timeout("20 seconds")),
           )
           .pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -346,16 +344,19 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             // The windows just changed; re-probe so the snapshot says so. A
             // failed probe republishes the pre-redemption limits rather than
             // marking them failed, so "confirmed" means `checkedAt` moved
-            // past what was published before the redemption started.
-            Effect.tap(() =>
+            // past what was published before the redemption started. Only a
+            // reset claims the limits changed, so only a reset reports an
+            // unconfirmed refresh.
+            Effect.tap((outcome) =>
               Effect.gen(function* () {
                 const before = (yield* snapshot.getSnapshot).usageLimits?.checkedAt;
                 const refreshed = yield* snapshot.refresh;
                 const after = refreshed.usageLimits?.checkedAt;
                 if (
-                  after === undefined ||
-                  after === before ||
-                  refreshed.usageLimits?.unavailable?.reason === "probeFailed"
+                  outcome === "reset" &&
+                  (after === undefined ||
+                    after === before ||
+                    refreshed.usageLimits?.unavailable?.reason === "probeFailed")
                 ) {
                   return yield* new ProviderDriverError({
                     driver: DRIVER_KIND,
