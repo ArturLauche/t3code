@@ -33,6 +33,7 @@ import {
   readCustomModelEntries,
   toCustomModelSetting,
 } from "@t3tools/shared/model";
+import type { OpenCodeProviderSettingsMap } from "@t3tools/contracts";
 import { cn } from "../../lib/utils";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
@@ -47,6 +48,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { DriverOption } from "./providerDriverMeta";
 import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
+import { OpenCodeProvidersSection } from "./OpenCodeProvidersSection";
+import {
+  readInstanceOpenCodeProviders,
+  withInstanceOpenCodeProviders,
+} from "./openCodeProviders.logic";
 import { ProviderInstanceIcon, providerInstanceInitials } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
@@ -131,6 +137,13 @@ function providerEnvironmentsEqual(
 function readConfigCustomModels(config: unknown): ReadonlyArray<CustomModelDefinition> {
   if (config === null || typeof config !== "object") return [];
   return readCustomModelEntries((config as Record<string, unknown>).customModels);
+}
+
+/** Whether this OpenCode instance talks to a server T3 Code does not start. */
+function serverUrlOf(config: unknown): string {
+  if (config === null || typeof config !== "object") return "";
+  const serverUrl = (config as Record<string, unknown>).serverUrl;
+  return typeof serverUrl === "string" ? serverUrl.trim() : "";
 }
 
 /**
@@ -511,6 +524,7 @@ export function ProviderInstanceCard({
     : null;
   const customModels =
     instance.driver === "antigravity" ? [] : readConfigCustomModels(instance.config);
+  const openCodeProviders = readInstanceOpenCodeProviders(instance.config);
   // Server-returned models may lag behind settings writes. Treat probe
   // models as the source for built-ins only; custom rows come directly
   // from the current instance config so add/remove reflects immediately.
@@ -549,6 +563,13 @@ export function ProviderInstanceCard({
         ? ({ ...rest, config: nextConfig } as ProviderInstanceConfig)
         : (rest as ProviderInstanceConfig),
     );
+  };
+
+  const updateOpenCodeProviders = (providers: OpenCodeProviderSettingsMap) => {
+    onUpdate({
+      ...instance,
+      config: withInstanceOpenCodeProviders(instance.config, providers),
+    } as ProviderInstanceConfig);
   };
 
   const updateCustomModels = (next: ReadonlyArray<CustomModelDefinition>) => {
@@ -1054,6 +1075,22 @@ export function ProviderInstanceCard({
           onChange={updateEnvironment}
         />
       </SettingsSection>
+
+      {instance.driver === "opencode" ? (
+        <SettingsSection
+          title="Providers"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          <OpenCodeProvidersSection
+            models={liveProvider?.models ?? []}
+            providers={openCodeProviders}
+            usesExternalServer={serverUrlOf(instance.config).length > 0}
+            onChange={updateOpenCodeProviders}
+          />
+        </SettingsSection>
+      ) : null}
 
       {driverOption !== undefined ? (
         <SettingsSection

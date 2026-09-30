@@ -21,6 +21,7 @@ import {
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   ProviderOptionSelections,
 } from "./model.ts";
+import { OpenCodeProviderSettingsMap } from "./openCodeProvider.ts";
 import {
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -977,6 +978,14 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    // Upstream providers and models added from Settings, in OpenCode's own
+    // `provider.<id>` shape. Hidden from the generic driver form because it is
+    // a nested collection with its own editor, and because OpenCode stays the
+    // component that resolves providers and reports which models connected.
+    providers: OpenCodeProviderSettingsMap.pipe(
+      Schema.withDecodingDefault(Effect.succeed({})),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
   },
   {
     order: ["binaryPath", "serverUrl", "serverPassword"],
@@ -1573,6 +1582,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
   serverUrl: Schema.optionalKey(TrimmedString),
   serverPassword: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
+  providers: Schema.optionalKey(OpenCodeProviderSettingsMap),
 });
 
 export const ServerSettingsPatch = Schema.Struct({

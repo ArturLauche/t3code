@@ -11,6 +11,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
+import {
+  type OpenCodeProviderEntry,
+  openCodeProviderEntries,
+} from "@t3tools/shared/openCodeProviderConfig";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   buildServerProvider,
@@ -113,6 +117,14 @@ function formatOpenCodeProbeError(input: {
     return {
       installed: false,
       message: "OpenCode CLI (`opencode`) is not installed or not on PATH.",
+    };
+  }
+
+  if (lower.includes("configinvalid")) {
+    return {
+      installed: true,
+      message:
+        "OpenCode rejected the configuration T3 Code handed it. Check the package, base URL and model limits of the providers added in Settings → Providers.",
     };
   }
 
@@ -293,6 +305,65 @@ function trimOptional(value: string | null | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+/**
+ * Models the user declared in Settings that OpenCode did not report back.
+ *
+ * A configured entry only becomes usable once OpenCode connects the provider,
+ * so a silent drop here would look like "my model vanished". Naming the
+ * missing slugs points at the usual causes — a wrong key, a base URL that does
+ * not speak the provider's API, or a model id the upstream does not serve.
+ */
+export function missingOpenCodeConfiguredModels(input: {
+  readonly entries: ReadonlyArray<OpenCodeProviderEntry>;
+  readonly reportedSlugs: ReadonlySet<string>;
+}): ReadonlyArray<string> {
+  const missing: string[] = [];
+  for (const entry of input.entries) {
+    for (const model of entry.models) {
+      const modelId = model.modelId.trim();
+      if (!modelId) continue;
+      const slug = `${entry.providerId}/${modelId}`;
+      if (!input.reportedSlugs.has(slug) && !missing.includes(slug)) {
+        missing.push(slug);
+      }
+    }
+  }
+  return missing;
+}
+
+/**
+ * Keep provider API keys out of the snapshot message.
+ *
+ * The document T3 Code hands OpenCode carries them, and an OpenCode error body
+ * can echo back the document it rejected. The message reaches clients, so both
+ * the document and the individual keys are removed before it is stored.
+ */
+export function redactOpenCodeSecretsFromMessage(input: {
+  readonly message: string;
+  readonly configContent: string | undefined;
+  readonly entries: ReadonlyArray<OpenCodeProviderEntry>;
+}): string {
+  let message = input.message;
+  for (const entry of input.entries) {
+    const apiKey = entry.apiKey.trim();
+    if (apiKey.length >= 8) {
+      message = message.replaceAll(apiKey, "<redacted>");
+    }
+  }
+  const configContent = input.configContent?.trim();
+  if (configContent !== undefined && configContent.length >= 8) {
+    message = message.replaceAll(configContent, "<redacted opencode config>");
+  }
+  return message;
+}
+
+function describeMissingConfiguredModels(missing: ReadonlyArray<string>): string | undefined {
+  if (missing.length === 0) return undefined;
+  const shown = missing.slice(0, 3).join(", ");
+  const rest = missing.length > 3 ? `, and ${missing.length - 3} more` : "";
+  return `${missing.length} configured model${missing.length === 1 ? "" : "s"} not reported by OpenCode (${shown}${rest}). Check the provider's package, base URL, and API key.`;
+}
+
 export function openCodeSkillsToServerProviderSkills(
   input: OpenCodeInventory["skills"] | undefined,
 ): ReadonlyArray<ServerProviderSkill> {
@@ -395,6 +466,13 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   const resolvedEnvironment = environment ?? process.env;
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const customModels = openCodeSettings.customModels;
+  const configuredProviders = openCodeProviderEntries(openCodeSettings.providers);
+  const redactSecrets = (message: string) =>
+    redactOpenCodeSecretsFromMessage({
+      message,
+      configContent: resolvedEnvironment.OPENCODE_CONFIG_CONTENT,
+      entries: configuredProviders,
+    });
   const isExternalServer = openCodeSettings.serverUrl.trim().length > 0;
 
   const fallback = (
@@ -418,7 +496,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         version,
         status: "error",
         auth: { status: "unknown" },
-        message: failure.message,
+        message: redactSecrets(failure.message),
       },
     });
   };
@@ -541,6 +619,18 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   );
   const skills = openCodeSkillsToServerProviderSkills(inventoryExit.value.inventory.skills);
   const connectedCount = inventoryExit.value.inventory.providerList.connected.length;
+  const missingConfigured = describeMissingConfiguredModels(
+    missingOpenCodeConfiguredModels({
+      entries: configuredProviders,
+      reportedSlugs: new Set(models.map((model) => model.slug)),
+    }),
+  );
+  const connectionMessage =
+    connectedCount > 0
+      ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
+      : isExternalServer
+        ? "Connected to the configured OpenCode server, but it did not report any connected upstream providers."
+        : "OpenCode is available, but it did not report any connected upstream providers.";
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
@@ -558,12 +648,11 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         status: connectedCount > 0 ? "authenticated" : "unknown",
         type: "opencode",
       },
-      message:
-        connectedCount > 0
-          ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
-          : isExternalServer
-            ? "Connected to the configured OpenCode server, but it did not report any connected upstream providers."
-            : "OpenCode is available, but it did not report any connected upstream providers.",
+      // Status stays driven by connectivity: one unreported model must not
+      // knock a working provider out of the model picker.
+      message: redactSecrets(
+        missingConfigured ? `${connectionMessage} ${missingConfigured}` : connectionMessage,
+      ),
     },
   });
 });

@@ -24,6 +24,7 @@ import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import {
   checkOpenCodeProviderStatus,
   openCodeCommandsToServerProviderSlashCommands,
+  redactOpenCodeSecretsFromMessage,
 } from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 import { readOpenCodeGoUsageLimits } from "./openCodeUsageLimits.ts";
@@ -289,6 +290,55 @@ beforeEach(() => {
   runtimeMock.reset();
 });
 
+it("keeps provider API keys out of an error message that echoed the configuration", () => {
+  const configContent = JSON.stringify({
+    provider: { local: { options: { apiKey: "sk-super-secret-value" } } },
+  });
+  NodeAssert.equal(
+    redactOpenCodeSecretsFromMessage({
+      message: `ConfigInvalidError: ${configContent}`,
+      configContent,
+      entries: [
+        {
+          providerId: "local",
+          env: [],
+          apiKey: "sk-super-secret-value",
+          apiKeyRedacted: false,
+          models: [],
+        },
+      ],
+    }),
+    // The key is scrubbed first, so the rest of the document stays readable for
+    // diagnosis instead of disappearing entirely.
+    'ConfigInvalidError: {"provider":{"local":{"options":{"apiKey":"<redacted>"}}}}',
+  );
+  NodeAssert.equal(
+    redactOpenCodeSecretsFromMessage({
+      message: "rejected: key sk-super-secret-value is invalid",
+      configContent,
+      entries: [
+        {
+          providerId: "local",
+          env: [],
+          apiKey: "sk-super-secret-value",
+          apiKeyRedacted: true,
+          models: [],
+        },
+      ],
+    }),
+    "rejected: key <redacted> is invalid",
+  );
+  // A stored key is never in the message to begin with; nothing to scrub.
+  NodeAssert.equal(
+    redactOpenCodeSecretsFromMessage({
+      message: "Failed to load OpenCode provider inventory: ConfigInvalidError",
+      configContent: undefined,
+      entries: [{ providerId: "local", env: [], apiKey: "", apiKeyRedacted: true, models: [] }],
+    }),
+    "Failed to load OpenCode provider inventory: ConfigInvalidError",
+  );
+});
+
 it("keeps native and MCP commands while preserving compaction and separate skills", () => {
   NodeAssert.deepEqual(
     openCodeCommandsToServerProviderSlashCommands([
@@ -317,6 +367,7 @@ const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSe
     serverUrl: "",
     serverPassword: "",
     customModels: [],
+    providers: {},
     ...overrides,
   });
 
@@ -436,6 +487,82 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
         agentDescriptor.options.find((option) => option.isDefault === true)?.id,
         "build",
       );
+    }),
+  );
+
+  it.effect("surfaces models the user configured that OpenCode never connected", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.inventory = {
+        providerList: {
+          connected: ["openai"],
+          all: [
+            {
+              id: "openai",
+              name: "OpenAI",
+              models: { "gpt-5.4": { id: "gpt-5.4", name: "GPT-5.4" } },
+            },
+          ],
+          default: {},
+        },
+        agents: [{ name: "build", hidden: false, mode: "primary" }],
+      };
+
+      const snapshot = yield* checkProvider(
+        makeOpenCodeSettings({
+          providers: {
+            openai: { models: [{ modelId: "gpt-5.4" }, { modelId: "gpt-next" }] },
+            local: {
+              baseUrl: "http://127.0.0.1:1234/v1",
+              models: [{ modelId: "vendor/large" }],
+            },
+          },
+        }),
+      );
+
+      // The connected provider keeps its configured model and stays ready: one
+      // bad entry must not knock a working provider out of the picker.
+      NodeAssert.equal(snapshot.status, "ready");
+      NodeAssert.ok(snapshot.models.some((model) => model.slug === "openai/gpt-5.4"));
+      NodeAssert.ok(snapshot.message?.includes("openai/gpt-next"));
+      NodeAssert.ok(snapshot.message?.includes("local/vendor/large"));
+      NodeAssert.ok(snapshot.message?.includes("2 configured models not reported"));
+    }),
+  );
+
+  it.effect("says nothing about missing models when every configured model connected", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.inventory = {
+        providerList: {
+          connected: ["openai"],
+          all: [
+            {
+              id: "openai",
+              name: "OpenAI",
+              models: { "gpt-next": { id: "gpt-next", name: "GPT Next" } },
+            },
+          ],
+          default: {},
+        },
+        agents: [],
+      };
+
+      const snapshot = yield* checkProvider(
+        makeOpenCodeSettings({ providers: { openai: { models: [{ modelId: "gpt-next" }] } } }),
+      );
+      NodeAssert.equal(snapshot.status, "ready");
+      NodeAssert.equal(snapshot.message, "1 upstream provider connected through OpenCode.");
+    }),
+  );
+
+  it.effect("names the managed configuration when OpenCode rejects it", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.inventoryError = new Error("ConfigInvalidError");
+      const snapshot = yield* checkProvider(
+        makeOpenCodeSettings({ providers: { local: { apiKey: "sk" } } }),
+      );
+      NodeAssert.equal(snapshot.status, "error");
+      NodeAssert.ok(snapshot.message?.includes("rejected the configuration"));
+      NodeAssert.ok(snapshot.message?.includes("Providers"));
     }),
   );
 

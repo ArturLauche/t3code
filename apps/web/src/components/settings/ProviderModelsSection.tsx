@@ -157,6 +157,11 @@ interface ProviderModelsSectionProps {
  *   - duplicate of a non-custom (probe-reported) slug → "already built in"
  *   - exceeds `MAX_CUSTOM_MODEL_LENGTH` → length error
  *   - duplicate of an already-saved custom slug → already-saved error
+ *
+ * OpenCode is the exception: a bare slug only fakes a picker row there,
+ * because OpenCode resolves models from its own configuration. Adding one
+ * through the Providers section instead makes it real, so this section keeps
+ * ownership of picker concerns only and points at that section for additions.
  */
 export function ProviderModelsSection({
   instanceId,
@@ -223,7 +228,7 @@ export function ProviderModelsSection({
   }, [displayModels]);
 
   const handleAdd = () => {
-    if (driverKind === "antigravity") return;
+    if (driverKind === "antigravity" || driverKind === "opencode") return;
     const normalized = normalizeCustomModelSlug(input);
     if (!normalized) {
       setError("Enter a model slug.");
@@ -534,7 +539,11 @@ export function ProviderModelsSection({
             {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
           </span>
         </div>
-        {driverKind !== "antigravity" && !isAdding ? (
+        {driverKind === "opencode" ? (
+          <span className="ml-auto text-2xs text-muted-foreground/80">
+            Add models in the Providers section above.
+          </span>
+        ) : driverKind !== "antigravity" && !isAdding ? (
           <Button
             type="button"
             size="xs"
@@ -592,7 +601,7 @@ export function ProviderModelsSection({
         })}
       </div>
 
-      {driverKind === "antigravity" ? null : isAdding ? (
+      {driverKind === "antigravity" || driverKind === "opencode" ? null : isAdding ? (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <Input
             id={`provider-instance-${instanceId}-custom-model`}
@@ -627,7 +636,7 @@ export function ProviderModelsSection({
         </div>
       ) : null}
 
-      {driverKind !== "antigravity" && error ? (
+      {driverKind !== "antigravity" && driverKind !== "opencode" && error ? (
         <p className="mt-2 text-xs text-destructive">{error}</p>
       ) : null}
     </div>
