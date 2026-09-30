@@ -344,6 +344,10 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       const firstId = ProviderInstanceId.make("freebuff_primary");
       const extraId = ProviderInstanceId.make("freebuff_extra");
       const driver = ProviderDriverKind.make("freebuff");
+      // Two instances the user has not expressed a preference between. The
+      // survivor is decided by the id rather than by settings key order, so
+      // rewriting settings.json cannot swap the live instance and kill the
+      // session it is running.
       const { registry } = yield* makeProviderInstanceRegistry({
         drivers: [FreebuffDriver],
         configMap: {
@@ -363,12 +367,33 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       });
 
       expect((yield* registry.listInstances).map((instance) => instance.instanceId)).toEqual([
-        firstId,
+        extraId,
       ]);
       const unavailable = yield* registry.listUnavailable;
       expect(unavailable).toHaveLength(1);
-      expect(unavailable[0]?.instanceId).toBe(extraId);
+      expect(unavailable[0]?.instanceId).toBe(firstId);
       expect(unavailable[0]?.unavailableReason).toMatch(/only one configured instance/);
+
+      const reordered = yield* makeProviderInstanceRegistry({
+        drivers: [FreebuffDriver],
+        configMap: {
+          [extraId]: {
+            driver,
+            displayName: "Freebuff extra",
+            enabled: false,
+            config: { enabled: false },
+          },
+          [firstId]: {
+            driver,
+            displayName: "Freebuff",
+            enabled: false,
+            config: { enabled: false },
+          },
+        },
+      });
+      expect(
+        (yield* reordered.registry.listInstances).map((instance) => instance.instanceId),
+      ).toEqual([extraId]);
     }).pipe(
       Effect.provideService(PtyAdapter.PtyAdapter, TestPtyAdapterService),
       Effect.provide(testLayer),

@@ -1085,7 +1085,13 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                   ...prompt,
                   {
                     type: "text",
-                    text: buildRuntimeInstructions({ harness: "Antigravity", model }),
+                    text: buildRuntimeInstructions({
+                      harness: "Antigravity",
+                      model,
+                      // ACP session setup always registers T3 Code's MCP
+                      // server for this adapter.
+                      supportsMcpTooling: true,
+                    }),
                   },
                 ],
               },

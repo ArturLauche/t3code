@@ -74,8 +74,11 @@ describe("Freebuff provider status", () => {
         auth: { status: "authenticated" },
         supportsTextGeneration: false,
       });
+      // `warning`, not `error`: the CLI is healthy and the only thing missing
+      // is a sign-in the user performs. `error` is reserved for a broken
+      // install or a failed probe, which no action in Settings can fix.
       expect(unauthenticated).toMatchObject({
-        status: "error",
+        status: "warning",
         auth: { status: "unauthenticated" },
         supportsTextGeneration: false,
       });

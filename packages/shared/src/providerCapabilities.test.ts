@@ -266,12 +266,65 @@ describe("getUnsupportedProviderInputReason", () => {
   });
 
   it("titles each restriction distinctly", () => {
-    expect(getUnsupportedProviderInputBannerCopy({ kind: "mode", reason: "x" }).title).toBe(
+    expect(getUnsupportedProviderInputBannerCopy({ kind: "mode" }).title).toBe(
       "Provider mode unavailable",
     );
-    expect(getUnsupportedProviderInputBannerCopy({ kind: "attachment", reason: "x" }).title).toBe(
+    expect(getUnsupportedProviderInputBannerCopy({ kind: "attachment" }).title).toBe(
       "Image attachments unavailable",
     );
+    expect(getUnsupportedProviderInputBannerCopy({ kind: "unknown" }).title).toBe(
+      "Waiting for the server",
+    );
+  });
+
+  describe("capability unknown", () => {
+    it("blocks rather than assuming an unresolved provider supports everything", () => {
+      // The permissive default for a null provider is right for the composer,
+      // which has its own send button to disable, and wrong for a background
+      // queue drain with nothing on screen. The caller states which it is.
+      expect(
+        getUnsupportedProviderInputReason({
+          provider: null,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          attachmentCount: 0,
+          capabilityUnknown: true,
+        }),
+      ).toMatchObject({ kind: "unknown" });
+    });
+
+    it("takes precedence over a restriction the loaded snapshot would report", () => {
+      expect(
+        getUnsupportedProviderInputReason({
+          provider: cline,
+          runtimeMode: "auto",
+          interactionMode: "default",
+          attachmentCount: 2,
+          capabilityUnknown: true,
+        }),
+      ).toMatchObject({ kind: "unknown" });
+    });
+
+    it("leaves an explicitly resolved provider alone", () => {
+      expect(
+        getUnsupportedProviderInputReason({
+          provider: cline,
+          runtimeMode: "auto",
+          interactionMode: "default",
+          attachmentCount: 0,
+          capabilityUnknown: false,
+        }),
+      ).toMatchObject({ kind: "mode" });
+      expect(
+        getUnsupportedProviderInputReason({
+          provider: cline,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          attachmentCount: 0,
+          capabilityUnknown: false,
+        }),
+      ).toBeNull();
+    });
   });
 });
 

@@ -3,11 +3,23 @@ import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
   it("requires explicit registration of every PR and stack layer", () => {
-    const instructions = buildRuntimeInstructions({ harness: "Codex" });
+    const instructions = buildRuntimeInstructions({ harness: "Codex", supportsMcpTooling: true });
     expect(instructions).toContain("When the t3-code MCP server exposes link_pull_request");
     expect(instructions).toContain("with the full PR URL immediately after creating a PR");
     expect(instructions).toContain("For a stack, call it for every layer");
     expect(instructions).toContain("call list_thread_pull_requests and link any PR");
+  });
+
+  it("withholds the pull-request instructions unless a call site opts in", () => {
+    // Every provider attaches T3 Code's MCP server conditionally. Naming tools
+    // that were never registered is a guaranteed failure the user sees, so the
+    // omission is the default and a call site has to state the tools are there.
+    for (const harness of ["Codex", "Cline", "Freebuff", "OpenCode"]) {
+      const instructions = buildRuntimeInstructions({ harness });
+      expect(instructions).toContain(`through the ${harness} harness`);
+      expect(instructions).not.toContain("t3-code MCP server");
+      expect(instructions).not.toContain("link_pull_request");
+    }
   });
 
   it("omits unavailable MCP tooling instructions for terminal-only providers", () => {
@@ -26,6 +38,7 @@ describe("buildRuntimeInstructions", () => {
         harness: "Codex",
         model: "  custom\nmodel  ",
         reasoningEffort: " high\n",
+        supportsMcpTooling: true,
       }),
     ).toContain("through the Codex harness, as custom model with high reasoning effort.");
   });

@@ -94,6 +94,22 @@ const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boole
   Equal.equals(a, b);
 
 /**
+ * How strongly an entry's configuration asks to be the live one.
+ *
+ * An explicit `false` on either the envelope or the raw config blob is the
+ * user's decision and wins (most restrictive); an explicit `true` on either is
+ * an unambiguous opt-in. Anything else is unspecified, and which side of the
+ * line it falls on depends on the driver's own schema default — not yet
+ * decoded at the point a single-instance driver has to pick a survivor.
+ */
+const singleInstanceEntryRank = (entry: ProviderInstanceConfig): number => {
+  const configEnabled = providerInstanceConfigEnabledFlag(entry.config);
+  if (entry.enabled === false || configEnabled === false) return 2;
+  if (entry.enabled === true || configEnabled === true) return 0;
+  return 1;
+};
+
+/**
  * Resolve an entry's enabled state. An explicit false on either the
  * envelope or the raw config blob wins (most restrictive) — old settings
  * files can carry both flags with conflicting values, and a user's disable
@@ -248,25 +264,31 @@ const makeReconcile = <R>(input: {
       );
       const singleInstanceCandidates = new Map<
         ProviderDriverKind,
-        Array<{ readonly instanceId: ProviderInstanceId; readonly enabled: boolean }>
+        Array<{ readonly instanceId: ProviderInstanceId; readonly rank: number }>
       >();
       const blockedMultipleInstanceIds = new Set<ProviderInstanceId>();
       for (const [rawInstanceId, entry] of nextRaw) {
         const driver = driversById.get(entry.driver);
         if (driver?.metadata.supportsMultipleInstances !== false) continue;
         const candidates = singleInstanceCandidates.get(entry.driver) ?? [];
-        const configEnabled = providerInstanceConfigEnabledFlag(entry.config);
         candidates.push({
           instanceId: ProviderInstanceId.make(rawInstanceId),
-          enabled:
-            entry.enabled !== false &&
-            configEnabled !== false &&
-            (entry.enabled === true || configEnabled === true),
+          rank: singleInstanceEntryRank(entry),
         });
         singleInstanceCandidates.set(entry.driver, candidates);
       }
       for (const [driver, candidates] of singleInstanceCandidates) {
-        const kept = candidates.find((candidate) => candidate.enabled) ?? candidates[0];
+        // Ranked rather than filtered on `enabled`, because this runs before
+        // any driver config has been decoded and so cannot know whether an
+        // omitted flag means enabled or disabled. "Explicitly on" wins over
+        // "unspecified", which wins over "explicitly off", and the tie-break is
+        // the instance id: taking the first settings key would swap the live
+        // instance — and kill its session — whenever the file is rewritten in a
+        // different order.
+        const kept = [...candidates].sort(
+          (left, right) =>
+            left.rank - right.rank || left.instanceId.localeCompare(right.instanceId),
+        )[0];
         if (!kept) continue;
         for (const candidate of candidates) {
           if (candidate.instanceId === kept.instanceId) continue;

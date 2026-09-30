@@ -69,6 +69,7 @@
     {
       "driver": "freebuff",
       "t3CodeRange": ">=0.0.42",
+      "uncharacterized": true,
       "ranges": []
     }
   ],

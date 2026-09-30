@@ -41,6 +41,10 @@ Provider-specific behavior belongs behind an adapter. Orchestration works with n
 and events, so adding a provider should not require branches throughout the domain or clients.
 See [provider constraints](./providers.md).
 
+Running a provider somewhere other than this host has its own ownership and lifecycle rules, because
+a remote sandbox is a shared, billable resource this environment does not own outright.
+See [cloud runtimes](./cloud-runtimes.md).
+
 ## Settings ownership
 
 Client preferences stay in the current client; environment defaults and project overrides stay

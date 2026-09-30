@@ -7,7 +7,12 @@ import {
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
-import { getUnsupportedProviderInputReason } from "@t3tools/shared/providerCapabilities";
+import {
+  getUnsupportedProviderInputReason,
+  getUnsupportedProviderInputBannerCopy,
+  type UnsupportedProviderInput,
+  type UnsupportedProviderInputKind,
+} from "@t3tools/shared/providerCapabilities";
 
 import { buildMessageContext, terminalContextReference } from "../../lib/composerContextRecords";
 import { removeInlineContextReference } from "../../lib/composerContextReferences";
@@ -38,6 +43,23 @@ async function run<W, A, E>(command: AtomCommand<W, A, E>, input: W): Promise<A>
   const result = await runAtomCommand(appAtomRegistry, command, input, { reportFailure: false });
   if (result._tag === "Failure") throw squashAtomCommandFailure(result);
   return result.value;
+}
+
+/**
+ * A capability restriction the user can act on, as opposed to a send that
+ * broke. Throwing the composer's reason would render every block as a red
+ * failure toast with no route out, so the kind travels with it and the caller
+ * reports a warning that names the one recovery this path actually has:
+ * cancelling the message and re-sending it from the composer.
+ */
+class QueuedMessageBlockedError extends Error {
+  readonly kind: UnsupportedProviderInputKind;
+
+  constructor(restriction: UnsupportedProviderInput) {
+    super(restriction.reason);
+    this.name = "QueuedMessageBlockedError";
+    this.kind = restriction.kind;
+  }
 }
 
 /**
@@ -74,21 +96,37 @@ export async function sendQueuedMessage(
     if (reason !== null) throw new Error(reason);
   };
   // The composer's send gate cannot cover a queue that drains on its own, so
-  // the same provider-capability rules are asserted here. A rejected send stays
-  // at the head of the queue and the user edits the draft in the composer.
+  // the same provider-capability rules are asserted here. A blocked send stays
+  // at the head of the queue rather than being handed to a provider that would
+  // drop the attachment or cannot enforce the access mode.
+  //
+  // The provider is resolved from the message's own instance, which is frozen
+  // at enqueue time, so switching the composer to another agent does not change
+  // this verdict. "Cancel" is the only route back to a sendable draft.
   const assertProviderInputAllowed = () => {
+    const config = readConfig();
     const provider =
-      readConfig()?.providers.find(
+      config?.providers.find(
         (candidate) => candidate.instanceId === sendSettings.modelSelection.instanceId,
       ) ?? null;
+    // An unloaded `serverConfig` is not a provider that supports everything:
+    // failing open here would inline an image as a data URL and ship it to a
+    // provider that declares it drops non-text content.
+    const capabilityUnknown =
+      config === undefined ||
+      provider === null ||
+      !config.providers.some(
+        (candidate) => candidate.instanceId === sendSettings.modelSelection.instanceId,
+      );
     const reason = getUnsupportedProviderInputReason({
       provider,
       runtimeMode: sendSettings.runtimeMode,
       interactionMode: sendSettings.interactionMode,
       attachmentCount: attachments.length,
       fileCount: message.files.length,
+      capabilityUnknown,
     });
-    if (reason !== null) throw new Error(reason.reason);
+    if (reason !== null) throw new QueuedMessageBlockedError(reason);
   };
   try {
     const { sendableTerminalContexts, hasSendableContent } = deriveComposerSendState({
@@ -221,6 +259,16 @@ export async function sendQueuedMessage(
   } catch (error) {
     if (!queue.failSend(threadKey, message.id)) return;
     const title = readThreadShell(threadRef)?.title;
+    if (error instanceof QueuedMessageBlockedError) {
+      // A pre-flight block, not a broken send: the message is intact and the
+      // user decides what to do with it.
+      toastManager.add({
+        type: "warning",
+        title: getUnsupportedProviderInputBannerCopy({ kind: error.kind }).title,
+        description: `${error.message} Cancel this message and send it again from the composer.`,
+      });
+      return;
+    }
     toastManager.add({
       type: "error",
       title: title ? `Queued message not sent in "${title}"` : "Queued message not sent",

@@ -32,8 +32,18 @@ const RUNTIME_KINDS: ReadonlyArray<{ value: CloudRuntimeKind; label: string }> =
 const RUNTIME_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const isValidRuntimeId = (value: string): boolean =>
   RUNTIME_ID_PATTERN.test(value) && value !== "local";
-const isValidCloudApiUrl = (value: string): boolean =>
-  value.trim() === "" || /^https:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/u.test(value.trim());
+/** Mirrors `CloudApiUrl` so a rejected value is never submitted or discarded. */
+const isValidCloudApiUrl = (value: string): boolean => {
+  const trimmed = value.trim();
+  return trimmed.length <= 2_048 && /^https:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/u.test(trimmed);
+};
+/** Mirrors `CloudRuntimeConfig.setupCommands`, which trims and bounds each line. */
+const parseSetupCommandDraft = (draft: string): ReadonlyArray<string> =>
+  draft
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice(0, 4_000));
 
 type ConfigPatch = Partial<{
   kind: CloudRuntimeKind;
@@ -157,6 +167,13 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
   const [runtimes, setRuntimes] = useState<ReadonlyArray<CloudRuntimeInstance>>([]);
   const [apiKeys, setApiKeys] = useState<Readonly<Record<string, string>>>({});
   const [apiUrlDrafts, setApiUrlDrafts] = useState<Readonly<Record<string, string>>>({});
+  // Multi-line text is edited locally and committed on blur: persisting every
+  // keystroke round-trips through the server, which trims each line, so the
+  // controlled value would snap back under the cursor and swallow the
+  // whitespace inside a command.
+  const [setupCommandDrafts, setSetupCommandDrafts] = useState<Readonly<Record<string, string>>>(
+    {},
+  );
   const [newRuntimeId, setNewRuntimeId] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const refreshGeneration = useRef(0);
@@ -206,6 +223,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
     setRuntimes([]);
     setApiKeys({});
     setApiUrlDrafts({});
+    setSetupCommandDrafts({});
     setBusyId(null);
   }, [environmentId]);
 
@@ -256,10 +274,23 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
     [configuredRuntimes, runtimes],
   );
 
-  const updateRuntime = (id: CloudRuntimeId, patch: ConfigPatch) => {
+  const discardDraft = (
+    setter: (
+      updater: (current: Readonly<Record<string, string>>) => Readonly<Record<string, string>>,
+    ) => void,
+    id: string,
+  ) =>
+    setter((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+
+  const updateRuntime = async (id: CloudRuntimeId, patch: ConfigPatch): Promise<boolean> => {
     const current = configuredRuntimes[id];
-    if (!current) return;
-    void updateSettings({
+    if (!current) return false;
+    const result = await updateSettings({
       environmentId,
       input: {
         patch: {
@@ -269,6 +300,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
         },
       },
     });
+    return result._tag === "Success";
   };
 
   const addRuntime = () => {
@@ -312,6 +344,10 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
           delete copy[id];
           return copy;
         });
+        // A re-added runtime must not inherit an endpoint or a setup-command
+        // draft from the one that was just removed.
+        discardDraft(setApiUrlDrafts, id);
+        discardDraft(setSetupCommandDrafts, id);
         setBusyId(null);
       }
     })();
@@ -324,6 +360,21 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
     } finally {
       setBusyId((current) => (current === id ? null : current));
     }
+  };
+
+  /**
+   * Runs a vendor action only once the endpoint the user just typed is the one
+   * the server holds, so a Test issued in the same gesture as the blur cannot
+   * probe the previous endpoint and report its result as the new one.
+   */
+  const withCommittedDrafts = async (id: CloudRuntimeId, action: () => Promise<unknown>) => {
+    const draft = apiUrlDrafts[id];
+    if (draft !== undefined && isValidCloudApiUrl(draft)) {
+      const committed = await updateRuntime(id, { apiUrl: draft });
+      if (!committed) return;
+      discardDraft(setApiUrlDrafts, id);
+    }
+    await action();
   };
 
   const runSandboxAction = async (
@@ -370,7 +421,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   </View>
                   <Switch
                     value={config.enabled}
-                    onValueChange={(enabled) => updateRuntime(runtime.id, { enabled })}
+                    onValueChange={(enabled) => void updateRuntime(runtime.id, { enabled })}
                   />
                   <RuntimeButton
                     label="Remove"
@@ -381,27 +432,27 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
 
                 <RuntimeChoice
                   value={config.kind}
-                  onChange={(kind) => updateRuntime(runtime.id, { kind })}
+                  onChange={(kind) => void updateRuntime(runtime.id, { kind })}
                 />
                 <RuntimeInput
                   label="Display name"
                   value={config.displayName ?? ""}
-                  onChangeText={(displayName) => updateRuntime(runtime.id, { displayName })}
+                  onChangeText={(displayName) => void updateRuntime(runtime.id, { displayName })}
                 />
                 <RuntimeInput
                   label="Region"
                   value={config.region ?? ""}
-                  onChangeText={(region) => updateRuntime(runtime.id, { region })}
+                  onChangeText={(region) => void updateRuntime(runtime.id, { region })}
                 />
                 <RuntimeInput
                   label="Template or snapshot"
                   value={config.template ?? ""}
-                  onChangeText={(template) => updateRuntime(runtime.id, { template })}
+                  onChangeText={(template) => void updateRuntime(runtime.id, { template })}
                 />
                 <RuntimeInput
                   label="Domain"
                   value={config.domain ?? ""}
-                  onChangeText={(domain) => updateRuntime(runtime.id, { domain })}
+                  onChangeText={(domain) => void updateRuntime(runtime.id, { domain })}
                 />
                 <RuntimeInput
                   label="API endpoint"
@@ -412,11 +463,10 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   onBlur={() => {
                     const value = apiUrlDrafts[runtime.id] ?? config.apiUrl ?? "";
                     if (!isValidCloudApiUrl(value)) return;
-                    updateRuntime(runtime.id, { apiUrl: value });
-                    setApiUrlDrafts((current) => {
-                      const next = { ...current };
-                      delete next[runtime.id];
-                      return next;
+                    // A rejected endpoint keeps its draft: the value the user
+                    // typed is the only copy of it.
+                    void updateRuntime(runtime.id, { apiUrl: value }).then((committed) => {
+                      if (committed) discardDraft(setApiUrlDrafts, runtime.id);
                     });
                   }}
                 />
@@ -428,7 +478,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   keyboardType="number-pad"
                   onChangeText={(value) => {
                     const parsed = Number(value);
-                    updateRuntime(runtime.id, {
+                    void updateRuntime(runtime.id, {
                       autoPauseMinutes:
                         value.trim() === "" || !Number.isFinite(parsed)
                           ? null
@@ -438,13 +488,19 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                 />
                 <RuntimeInput
                   label="Setup commands (one per line)"
-                  value={config.setupCommands.join("\n")}
+                  value={setupCommandDrafts[runtime.id] ?? config.setupCommands.join("\n")}
                   multiline
                   onChangeText={(value) =>
-                    updateRuntime(runtime.id, {
-                      setupCommands: value.split(/\r?\n/u).filter((line) => line.trim().length > 0),
-                    })
+                    setSetupCommandDrafts((current) => ({ ...current, [runtime.id]: value }))
                   }
+                  onBlur={() => {
+                    const draft = setupCommandDrafts[runtime.id];
+                    if (draft === undefined) return;
+                    const next = parseSetupCommandDraft(draft);
+                    void updateRuntime(runtime.id, { setupCommands: next }).then((committed) => {
+                      if (committed) discardDraft(setSetupCommandDrafts, runtime.id);
+                    });
+                  }}
                 />
                 <RuntimeInput
                   label="API key"
@@ -461,7 +517,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     label="Save key"
                     disabled={busy || !apiKeys[runtime.id]?.trim()}
                     onPress={() =>
-                      void run(runtime.id, async () => {
+                      void withCommittedDrafts(runtime.id, async () => {
                         const result = await setCredential({
                           environmentId,
                           input: {
@@ -480,7 +536,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     label="Test"
                     disabled={busy || !config.enabled || !runtime.hasCredential}
                     onPress={() =>
-                      void run(runtime.id, async () => {
+                      void withCommittedDrafts(runtime.id, async () => {
                         const result = await testRuntime({
                           environmentId,
                           input: { runtimeId: runtime.id },
@@ -493,7 +549,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     label="Create sandbox"
                     disabled={busy || !config.enabled || !runtime.hasCredential}
                     onPress={() =>
-                      void run(runtime.id, async () => {
+                      void withCommittedDrafts(runtime.id, async () => {
                         const result = await createSandbox({
                           environmentId,
                           input: { runtimeId: runtime.id, name: `t3-${runtime.id}` },
@@ -537,7 +593,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                         label="Refresh"
                         disabled={busy}
                         onPress={() =>
-                          void run(runtime.id, async () => {
+                          void withCommittedDrafts(runtime.id, async () => {
                             const result = await listSandboxes({
                               environmentId,
                               input: { runtimeId: runtime.id },

@@ -227,8 +227,21 @@ const connectionOptions = (input: {
   ...(input.config.domain ? { domain: input.config.domain } : {}),
 });
 
+/**
+ * E2B and Novita currently publish only `running` and `paused`; a `stopped`
+ * or `error` string is preserved rather than collapsed so a future vendor
+ * state stays visible to the lifecycle UI and to preparation, which refuses
+ * to reuse anything it did not positively recognise.
+ */
+const E2B_STATE_BY_VENDOR_STATE: ReadonlyMap<string, CloudSandboxSummary["state"]> = new Map([
+  ["running", "running"],
+  ["paused", "paused"],
+  ["stopped", "stopped"],
+  ["error", "error"],
+]);
+
 const normalizeE2BState = (state: string): CloudSandboxSummary["state"] =>
-  state === "running" ? "running" : state === "paused" ? "paused" : "unknown";
+  E2B_STATE_BY_VENDOR_STATE.get(state) ?? "unknown";
 
 const isE2BInfo = (value: unknown): value is { readonly sandboxId: string } =>
   typeof value === "object" &&

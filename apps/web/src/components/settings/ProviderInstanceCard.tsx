@@ -579,9 +579,12 @@ export function ProviderInstanceCard({
     );
   };
 
+  // A target the user switched off is this device, not a stale route, and a
+  // runtime that has since been removed from the offer list is genuinely
+  // stale: it names a destination the server will refuse.
+  const runsOnCloud = instance.executionTarget?.enabled === true;
   const staleCloudTarget =
-    instance.executionTarget !== undefined &&
-    !cloudRuntimeIds.includes(instance.executionTarget.runtimeId);
+    runsOnCloud && !cloudRuntimeIds.includes(instance.executionTarget?.runtimeId ?? "");
 
   const titleIconNode = driverKind ? (
     <ProviderInstanceIcon

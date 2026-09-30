@@ -18,14 +18,37 @@ const io = vi.hoisted(() => ({
 }));
 const config = {
   environment: { capabilities: { attachmentUploads: true, inlineMessageContext: true } },
-  providers: [] as Array<Record<string, unknown>>,
+  providers: [] as Array<Record<string, unknown>> | undefined,
 };
+/** A snapshot that accepts every attachment and access mode T3 can request. */
+const permissiveProvider = (overrides: Record<string, unknown> = {}) => ({
+  instanceId: ProviderInstanceId.make("codex"),
+  displayName: "Codex",
+  driver: "codex",
+  supportsImageAttachments: true,
+  supportsFileAttachments: true,
+  ...overrides,
+});
 vi.mock("@t3tools/client-runtime/state/runtime", async (load) => ({
   ...(await load<typeof import("@t3tools/client-runtime/state/runtime")>()),
   runAtomCommand: (...args: unknown[]) => io.run(...args),
 }));
+// `sendQueuedMessage` reads the config through the registry, so a test has to
+// be able to swap what the registry hands back — including making the whole
+// config absent, which is what a reconnect looks like to the gate.
+const appAtomRegistryConfig = config;
 vi.mock("../rpc/atomRegistry", () => ({
-  appAtomRegistry: { get: () => new Map([["env-a", config]]) },
+  appAtomRegistry: {
+    get: () =>
+      new Map([
+        [
+          "env-a",
+          appAtomRegistryConfig.providers === undefined
+            ? undefined
+            : { ...appAtomRegistryConfig, providers: appAtomRegistryConfig.providers },
+        ],
+      ]),
+  },
 }));
 vi.mock("../state/server", () => ({ environmentServerConfigsAtom: {} }));
 vi.mock("../state/threads", () => ({
@@ -90,7 +113,11 @@ beforeEach(() => {
   io.run.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   io.upload.mockReset().mockResolvedValue(undefined);
   io.toast.mockReset();
-  config.providers = [];
+  // The capability gate is asserted in `sendQueuedMessage`, so every test
+  // needs a provider snapshot it can resolve. Leaving this empty would make
+  // each of them exercise the fail-closed "capability unknown" path instead of
+  // what it is about.
+  config.providers = [permissiveProvider()];
   io.shell = {
     modelSelection,
     branch: null,
@@ -264,16 +291,85 @@ describe("sendQueuedMessage", () => {
     ]);
   });
 
-  it("sends attachments when the selected provider accepts them", async () => {
-    config.providers = [
-      {
-        instanceId: modelSelection.instanceId,
-        displayName: "Codex",
-        driver: "codex",
-        supportsImageAttachments: true,
-        supportsFileAttachments: true,
-      },
+  it("holds the message when the environment's capabilities are not loaded yet", async () => {
+    // A reconnect leaves `serverConfig` undefined while the timeline is still
+    // rendered. "Unknown" must not read as "supported": an image would be
+    // inlined as a data URL and handed to a provider that drops it.
+    const providers = config.providers;
+    appAtomRegistryConfig.providers = undefined;
+    try {
+      const message = enqueue();
+      await sendQueuedMessage(threadRef, message.id);
+
+      expect(commandsRun()).toEqual([]);
+      expect(io.toast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "warning",
+          title: "Waiting for the server",
+          description: expect.stringContaining("Cancel this message"),
+        }),
+      );
+      expect(queue()?.map((entry) => entry.holdUntilUserAction)).toEqual([true]);
+    } finally {
+      appAtomRegistryConfig.providers = providers;
+    }
+  });
+
+  it("holds the message when its provider instance is no longer configured", async () => {
+    // The instance id is frozen on the message, so a rename in Settings makes
+    // the resolution fail rather than silently falling back to whatever
+    // provider happens to be selected now.
+    appAtomRegistryConfig.providers = [
+      permissiveProvider({ instanceId: ProviderInstanceId.make("other") }),
     ];
+    try {
+      const message = enqueue();
+      await sendQueuedMessage(threadRef, message.id);
+
+      expect(commandsRun()).toEqual([]);
+      expect(io.toast).toHaveBeenCalledWith(expect.objectContaining({ type: "warning" }));
+      expect(queue()?.map((entry) => entry.holdUntilUserAction)).toEqual([true]);
+    } finally {
+      appAtomRegistryConfig.providers = [permissiveProvider()];
+    }
+  });
+
+  it("re-checks capabilities at send time, not only at enqueue time", async () => {
+    // The provider can lose a capability between the message being queued and
+    // the queue draining. Only a check that runs on the send path catches it.
+    const message = enqueue({
+      images: [
+        {
+          type: "image" as const,
+          id: "image-1",
+          name: "a.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+          previewUrl: "data:image/png;base64,AAAA",
+          file: new File(["AAAA"], "a.png", { type: "image/png" }),
+        },
+      ],
+    });
+    appAtomRegistryConfig.providers = [
+      permissiveProvider({ supportsImageAttachments: false, supportsFileAttachments: false }),
+    ];
+    try {
+      await sendQueuedMessage(threadRef, message.id);
+
+      expect(commandsRun()).toEqual([]);
+      expect(io.toast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "warning",
+          title: "Image attachments unavailable",
+        }),
+      );
+    } finally {
+      appAtomRegistryConfig.providers = [permissiveProvider()];
+    }
+  });
+
+  it("sends attachments when the selected provider accepts them", async () => {
+    config.providers = [permissiveProvider({ instanceId: modelSelection.instanceId })];
     const image = {
       type: "image" as const,
       id: "image-1",

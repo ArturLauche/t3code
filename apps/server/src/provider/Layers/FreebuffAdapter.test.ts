@@ -18,6 +18,10 @@ import {
   makeFreebuffAdapter,
   mergeVisibleAssistantText,
 } from "./FreebuffAdapter.ts";
+import {
+  FREEBUFF_ENTER_TO_LOGIN_SCREEN_0_1_6,
+  FREEBUFF_LOGIN_SCREEN_0_1_6,
+} from "./freebuffScreens.ts";
 
 class FakePtyProcess implements PtyAdapter.PtyProcess {
   readonly pid = 4242;
@@ -351,6 +355,38 @@ describe("extractVisibleAssistantText", () => {
   });
 });
 
+describe("classifyFreebuffScreen against the real Freebuff TUI", () => {
+  it("recognises the login screen Freebuff 0.1.6 renders", () => {
+    // Captured through the same PTY and headless-terminal path the adapter
+    // uses. Reading this as anything but `authentication` is what turned a
+    // missing sign-in into a 30-second "did not reach its chat screen" timeout
+    // instead of the actionable "run `freebuff login`".
+    expect(classifyFreebuffScreen(FREEBUFF_LOGIN_SCREEN_0_1_6)).toMatchObject({
+      kind: "authentication",
+    });
+  });
+
+  it("recognises the Enter prompt shown before the login link", () => {
+    expect(classifyFreebuffScreen(FREEBUFF_ENTER_TO_LOGIN_SCREEN_0_1_6)).toMatchObject({
+      kind: "authentication",
+    });
+  });
+
+  it("does not read an answer about signing in as a login overlay", () => {
+    // The gate is provider chrome above the conversation. A turn that quotes
+    // the phrase on its own line must keep running.
+    const answer = [
+      "Enter a coding task or / for commands",
+      "[10:04] fix the login required redirect",
+      "waiting for login...",
+      "",
+      "The route now redirects to /sign-in.",
+      "Enter a coding task or / for commands",
+    ].join("\n");
+    expect(classifyFreebuffScreen(answer).kind).not.toBe("authentication");
+  });
+});
+
 describe("FreebuffAdapter", () => {
   it.live("starts local-only without implicitly trusting repository agents", () =>
     Effect.gen(function* () {
@@ -504,6 +540,44 @@ describe("FreebuffAdapter", () => {
       expect(history.turns[0]?.items[0]).toEqual({
         type: "user_message",
         text: "Make this reliable",
+      });
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.live("never publishes the terminal's own control sequences as assistant text", () =>
+    Effect.gen(function* () {
+      const process = new FakePtyProcess();
+      const adapter = yield* makeAdapter(process);
+      const events = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      const send = yield* adapter.sendTurn({ threadId, input: "Hello" }).pipe(Effect.forkChild);
+      yield* waitForActiveTurn(adapter);
+      // The real transport delivers every write twice: once as raw bytes from
+      // the PTY, then again as the rendered screen from the terminal's parse
+      // callback. Text taken from the raw chunk would publish the terminal's
+      // own control sequences as the assistant's answer and seed the next
+      // turn's baseline with them.
+      process.emitData("Enter a coding task or / for commands");
+      yield* Fiber.join(send);
+      process.emitData("\u001b[32mHere is the answer.\u001b[0m\r\n");
+      process.emitData("Here is the answer.\nEnter a coding task or / for commands");
+
+      const collected = yield* Fiber.join(events);
+      const deltas = collected
+        .filter((event) => event.type === "content.delta")
+        .map((event) => event.payload.delta);
+      expect(deltas.length).toBeGreaterThan(0);
+      for (const delta of deltas) {
+        expect(delta).not.toMatch(/\u001b/u);
+        expect(delta).toContain("Here is the answer.");
+      }
+      expect(collected.find((event) => event.type === "turn.completed")?.payload).toMatchObject({
+        state: "completed",
       });
       yield* adapter.stopSession(threadId);
     }),

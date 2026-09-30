@@ -83,6 +83,7 @@ import {
   providerSupportsFileAttachments,
   providerSupportsImageAttachments,
 } from "@t3tools/shared/providerCapabilities";
+import { resolveProviderInteractionMode } from "../../state/legacy-plan-mode";
 import {
   composerStripAttachments,
   type DraftComposerAttachment,
@@ -430,7 +431,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const providerCapabilitySendBlockReason = getUnsupportedProviderInputReason({
     provider: selectedProviderStatus,
     runtimeMode: currentRuntimeMode,
-    interactionMode: props.selectedThread.interactionMode,
+    // Coerced like every other surface. A thread saved in Plan mode under one
+    // provider and then switched to one without a Plan mode would otherwise be
+    // blocked for a mode this composer also has no control to clear.
+    interactionMode: resolveProviderInteractionMode(
+      selectedProviderStatus,
+      props.selectedThread.interactionMode,
+    ),
     // Counted apart so the message names the kind actually attached.
     attachmentCount: props.draftAttachments.length,
     fileCount: props.draftAttachments.filter((attachment) => !isComposerImageAttachment(attachment))

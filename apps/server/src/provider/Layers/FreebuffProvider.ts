@@ -193,7 +193,11 @@ export const checkFreebuffProviderStatus = Effect.fn("checkFreebuffProviderStatu
           : {
               installed: true,
               version,
-              status: "error",
+              // `warning`, not `error`: the CLI is healthy and the only thing
+              // missing is a sign-in the user performs themselves. `error` is
+              // how a broken install and a failed probe are reported, and
+              // badges render it as a fault rather than a to-do.
+              status: "warning",
               auth: { status: "unauthenticated" },
               message:
                 "Freebuff is installed, but this provider instance is not signed in. Open a terminal with this provider instance and run `freebuff login`, then retry.",

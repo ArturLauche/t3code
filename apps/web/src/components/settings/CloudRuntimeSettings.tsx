@@ -10,7 +10,7 @@ import {
 import { PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -30,8 +30,18 @@ const RUNTIME_KINDS: ReadonlyArray<{ value: CloudRuntimeKind; label: string }> =
 const RUNTIME_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const isValidRuntimeId = (value: string): boolean =>
   RUNTIME_ID_PATTERN.test(value) && value !== "local";
-const isValidCloudApiUrl = (value: string): boolean =>
-  value.trim() === "" || /^https:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/u.test(value.trim());
+/** Mirrors `CloudApiUrl` so a rejected value is never submitted or discarded. */
+const isValidCloudApiUrl = (value: string): boolean => {
+  const trimmed = value.trim();
+  return trimmed.length <= 2_048 && /^https:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/u.test(trimmed);
+};
+/** Mirrors `CloudRuntimeConfig.setupCommands`, which trims and bounds each line. */
+const parseSetupCommandDraft = (draft: string): ReadonlyArray<string> =>
+  draft
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice(0, 4_000));
 
 type RuntimeConfigPatch = Partial<{
   kind: CloudRuntimeKind;
@@ -112,7 +122,13 @@ export function CloudRuntimeSettings({
   readonly readOnly?: boolean;
 }) {
   const settings = useEnvironmentSettings(environmentId);
-  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  // The cloud runtime map is server-owned, so it goes straight to the
+  // environment command rather than through the client/shared patch split.
+  // Awaiting it is what lets a dependent action run against the endpoint the
+  // user just typed instead of the one the settings still hold.
+  const updateRuntimeSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: true,
+  });
   const listRuntimes = useAtomCommand(serverEnvironment.cloudRuntimeList, { reportFailure: true });
   const setCredential = useAtomCommand(serverEnvironment.cloudRuntimeSetCredential, {
     reportFailure: true,
@@ -134,6 +150,13 @@ export function CloudRuntimeSettings({
   const [newRuntimeId, setNewRuntimeId] = useState("");
   const [apiKeys, setApiKeys] = useState<Readonly<Record<string, string>>>({});
   const [apiUrlDrafts, setApiUrlDrafts] = useState<Readonly<Record<string, string>>>({});
+  // Multi-line text is edited locally and committed on blur. Persisting every
+  // keystroke would round-trip through the server, which trims each line, so
+  // the controlled value would snap back under the cursor and swallow the
+  // whitespace inside a command.
+  const [setupCommandDrafts, setSetupCommandDrafts] = useState<Readonly<Record<string, string>>>(
+    {},
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
   const refreshGeneration = useRef(0);
 
@@ -143,6 +166,7 @@ export function CloudRuntimeSettings({
     setRuntimes([]);
     setApiKeys({});
     setApiUrlDrafts({});
+    setSetupCommandDrafts({});
     setBusyId(null);
   }, [environmentId]);
 
@@ -163,17 +187,37 @@ export function CloudRuntimeSettings({
   }, [refresh]);
 
   const configuredRuntimes = settings.cloudRuntimeInstances;
+  /**
+   * Returns the settings update so a caller can sequence on it. A Test or
+   * Create action issued right after a blur would otherwise run against the
+   * endpoint the user just replaced, because the two use different lanes.
+   */
   const updateRuntime = useCallback(
-    (id: CloudRuntimeId, patch: RuntimeConfigPatch) => {
+    async (id: CloudRuntimeId, patch: RuntimeConfigPatch): Promise<boolean> => {
       const current = configuredRuntimes[id];
-      if (!current) return;
-      updateSettings({
-        cloudRuntimeInstances: {
-          [id]: mergeRuntimeConfig(current, patch),
-        },
+      if (!current) return false;
+      const result = await updateRuntimeSettings({
+        environmentId,
+        input: { patch: { cloudRuntimeInstances: { [id]: mergeRuntimeConfig(current, patch) } } },
+      });
+      return result._tag === "Success";
+    },
+    [configuredRuntimes, environmentId, updateRuntimeSettings],
+  );
+  /** Drops a draft only once the value it held is what the server accepted. */
+  const discardDraft = useCallback(
+    (
+      setter: React.Dispatch<React.SetStateAction<Readonly<Record<string, string>>>>,
+      id: string,
+    ) => {
+      setter((current) => {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
       });
     },
-    [configuredRuntimes, updateSettings],
+    [],
   );
 
   const addRuntime = useCallback(() => {
@@ -182,18 +226,25 @@ export function CloudRuntimeSettings({
       return;
     }
     const runtimeId = CloudRuntimeId.make(id);
-    updateSettings({
-      cloudRuntimeInstances: {
-        [runtimeId]: {
-          kind: "e2b",
-          enabled: true,
-          setupCommands: [],
+    // Sent as a whole entry rather than merged: there is no current
+    // configuration to merge into, because this id is not configured yet.
+    void updateRuntimeSettings({
+      environmentId,
+      input: {
+        patch: {
+          cloudRuntimeInstances: {
+            [runtimeId]: { kind: "e2b", enabled: true, setupCommands: [] },
+          },
         },
       },
+    }).then((result) => {
+      if (result._tag !== "Success") return;
+      // The typed id is only cleared once the runtime exists; a rejected add
+      // would otherwise discard what the user typed.
+      setNewRuntimeId("");
+      void refresh();
     });
-    setNewRuntimeId("");
-    void refresh();
-  }, [configuredRuntimes, newRuntimeId, refresh, updateSettings]);
+  }, [configuredRuntimes, environmentId, newRuntimeId, refresh, updateRuntimeSettings]);
 
   const removeRuntime = useCallback(
     (runtime: CloudRuntimeInstance) => {
@@ -208,18 +259,25 @@ export function CloudRuntimeSettings({
           // Continue removing the configuration; the server-side settings
           // transaction is the authoritative credential cleanup path.
         } finally {
-          updateSettings({ cloudRuntimeInstances: { [runtime.id]: null } });
+          void updateRuntimeSettings({
+            environmentId,
+            input: { patch: { cloudRuntimeInstances: { [runtime.id]: null } } },
+          });
           setApiKeys((current) => {
             const copy = { ...current };
             delete copy[runtime.id];
             return copy;
           });
+          // A re-added runtime must not inherit an endpoint or a setup-command
+          // draft from the one that was just removed.
+          discardDraft(setApiUrlDrafts, runtime.id);
+          discardDraft(setSetupCommandDrafts, runtime.id);
           setBusyId(null);
           void refresh();
         }
       })();
     },
-    [clearCredential, configuredRuntimes, environmentId, refresh, updateSettings],
+    [clearCredential, discardDraft, environmentId, refresh, updateRuntimeSettings],
   );
 
   const runCredentialCommand = useCallback(
@@ -313,6 +371,25 @@ export function CloudRuntimeSettings({
       }
     },
     [createSandbox, environmentId],
+  );
+
+  /**
+   * Runs a vendor action only once the endpoint the user just typed is the one
+   * the server holds. Without this a Test issued in the same gesture as the
+   * blur would probe the previous endpoint and report its result as if it were
+   * the new one.
+   */
+  const withCommittedDrafts = useCallback(
+    async (id: CloudRuntimeId, action: () => Promise<void>) => {
+      const draft = apiUrlDrafts[id];
+      if (draft !== undefined && isValidCloudApiUrl(draft)) {
+        const committed = await updateRuntime(id, { apiUrl: draft });
+        if (!committed) return;
+        discardDraft(setApiUrlDrafts, id);
+      }
+      await action();
+    },
+    [apiUrlDrafts, discardDraft, updateRuntime],
   );
 
   const visibleRuntimes = useMemo(
@@ -498,11 +575,10 @@ export function CloudRuntimeSettings({
                       onBlur={() => {
                         const value = apiUrlDrafts[runtime.id] ?? config.apiUrl ?? "";
                         if (!isValidCloudApiUrl(value)) return;
-                        updateRuntime(runtime.id, { apiUrl: value });
-                        setApiUrlDrafts((current) => {
-                          const next = { ...current };
-                          delete next[runtime.id];
-                          return next;
+                        // A rejected endpoint keeps its draft: the value the
+                        // user typed is the only copy of it.
+                        void updateRuntime(runtime.id, { apiUrl: value }).then((committed) => {
+                          if (committed) discardDraft(setApiUrlDrafts, runtime.id);
                         });
                       }}
                     />
@@ -539,17 +615,33 @@ export function CloudRuntimeSettings({
                   description="One command per line. They run when a new sandbox is prepared."
                   control={
                     <Textarea
-                      value={config.setupCommands.join("\n")}
+                      value={setupCommandDrafts[runtime.id] ?? config.setupCommands.join("\n")}
                       placeholder="npm install -g @openai/codex"
                       rows={3}
                       disabled={readOnly}
                       onChange={(event) =>
-                        updateRuntime(runtime.id, {
-                          setupCommands: event.currentTarget.value
-                            .split(/\r?\n/u)
-                            .filter((line) => line.trim().length > 0),
-                        })
+                        setSetupCommandDrafts((current) => ({
+                          ...current,
+                          [runtime.id]: event.currentTarget.value,
+                        }))
                       }
+                      onBlur={() => {
+                        const draft = setupCommandDrafts[runtime.id];
+                        if (draft === undefined) return;
+                        const next = parseSetupCommandDraft(draft);
+                        if (
+                          next.length === config.setupCommands.length &&
+                          next.every((line, index) => line === config.setupCommands[index])
+                        ) {
+                          discardDraft(setSetupCommandDrafts, runtime.id);
+                          return;
+                        }
+                        void updateRuntime(runtime.id, { setupCommands: next }).then(
+                          (committed) => {
+                            if (committed) discardDraft(setSetupCommandDrafts, runtime.id);
+                          },
+                        );
+                      }}
                     />
                   }
                 />
@@ -576,7 +668,11 @@ export function CloudRuntimeSettings({
                       <Button
                         size="xs"
                         disabled={readOnly || isBusy || !apiKeys[runtime.id]?.trim()}
-                        onClick={() => void runCredentialCommand(runtime.id, "set")}
+                        onClick={() =>
+                          void withCommittedDrafts(runtime.id, () =>
+                            runCredentialCommand(runtime.id, "set"),
+                          )
+                        }
                       >
                         Save
                       </Button>
@@ -602,14 +698,22 @@ export function CloudRuntimeSettings({
                         size="xs"
                         variant="ghost-muted"
                         disabled={readOnly || isBusy || !config.enabled || !runtime.hasCredential}
-                        onClick={() => void runCredentialCommand(runtime.id, "test")}
+                        onClick={() =>
+                          void withCommittedDrafts(runtime.id, () =>
+                            runCredentialCommand(runtime.id, "test"),
+                          )
+                        }
                       >
                         Test
                       </Button>
                       <Button
                         size="xs"
                         disabled={readOnly || isBusy || !config.enabled || !runtime.hasCredential}
-                        onClick={() => void createRuntimeSandbox(runtime.id)}
+                        onClick={() =>
+                          void withCommittedDrafts(runtime.id, () =>
+                            createRuntimeSandbox(runtime.id),
+                          )
+                        }
                       >
                         Create sandbox
                       </Button>
@@ -685,7 +789,9 @@ export function CloudRuntimeSettings({
                           size="xs"
                           variant="ghost-muted"
                           disabled={readOnly || isBusy}
-                          onClick={() => void refreshSandboxes(runtime.id)}
+                          onClick={() =>
+                            void withCommittedDrafts(runtime.id, () => refreshSandboxes(runtime.id))
+                          }
                         >
                           Refresh sandboxes
                         </Button>

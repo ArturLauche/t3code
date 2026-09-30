@@ -625,6 +625,20 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
                     return;
                   case "ModeChanged":
                     return;
+                  case "AvailableCommandsUpdated":
+                  case "ConfigOptionsUpdated":
+                    // Cline can republish its model catalog mid-session. The
+                    // next turn re-reads the live catalog before selecting, so
+                    // a change here needs no event; acknowledging it is what
+                    // stops the notification from being dropped.
+                    yield* logNative(
+                      ctx.threadId,
+                      "session/update",
+                      event._tag === "AvailableCommandsUpdated"
+                        ? event.rawPayload
+                        : event.rawPayload,
+                    );
+                    return;
                   case "ConnectionTerminated":
                     // The Cline process is gone. Without this the session keeps
                     // reporting `ready` and every later turn fails against a
@@ -707,6 +721,16 @@ export function makeClineAdapter(clineSettings: ClineSettings, options?: ClineAd
                       }),
                     );
                     return;
+                  default: {
+                    // A new ACP notification has to be classified here rather
+                    // than silently dropped, so the compiler names it.
+                    const unhandled: never = event;
+                    yield* Effect.logWarning("Unhandled Cline ACP notification", {
+                      threadId: ctx.threadId,
+                      tag: (unhandled as { readonly _tag: string })._tag,
+                    });
+                    return;
+                  }
                 }
               }),
             ),

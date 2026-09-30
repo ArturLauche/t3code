@@ -736,6 +736,38 @@ describe("releaseManagedTunnelOnShutdown", () => {
     );
   });
 
+  it.effect("does no cloud work on a host that was never linked", () => {
+    // A self-hosted or air-gapped install has no relay endpoint, no linked
+    // user and no stored connector config. Startup reconciliation must settle
+    // from this alone: the server's `hasCloudPublicConfig` guard exists to skip
+    // the reconciliation entirely, and that is only safe because these calls
+    // are local reads rather than a network round trip.
+    const { store } = makeMemorySecretStore([]);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      expect(yield* registerManagedCloudTunnelRecovery("http://127.0.0.1:3773")).toEqual({
+        status: "not_linked",
+      });
+      expect(yield* startManagedCloudTunnelIfOriginConfirmed("http://127.0.0.1:3773")).toBe(false);
+      expect(
+        yield* startManagedCloudTunnelIfOriginConfirmed("http://127.0.0.1:3773", {
+          requireConfirmedOrigin: false,
+        }),
+      ).toBe(false);
+      expect(applyConfigCalls).toEqual([]);
+      expect(requests).toEqual([]);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        respond: () => Response.json({ status: "ready" }),
+      }),
+    );
+  });
+
   it.effect("registers an existing tunnel and starts the confirmed connector", () => {
     const { store } = makeMemorySecretStore([
       [

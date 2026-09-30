@@ -309,6 +309,11 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
       connectionPhase: selectedEnvironment.connection.phase,
       hasServerConfig: selectedEnvironment.serverConfig !== null,
     });
+  // Lifted out of the effect below: `selectedEnvironment` is an object from
+  // `options.find`, so depending on it re-runs the effect on every rebuild of
+  // the option list even when nothing it branches on has changed.
+  const selectedEnvironmentIsMac =
+    selectedEnvironment?.serverConfig?.environment.platform.os === "darwin";
   const searchableEnvironmentId = options.find((environment) =>
     isProviderSettingsEnvironmentAvailable({
       connectionPhase: environment.connection.phase,
@@ -327,8 +332,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     if (
       !target.scoped &&
       searchTargetId === searchableSetting("cursor-keychain-usage").id &&
-      (!selectedEnvironmentCanRenderSettings ||
-        selectedEnvironment?.serverConfig?.environment.platform.os !== "darwin") &&
+      (!selectedEnvironmentCanRenderSettings || !selectedEnvironmentIsMac) &&
       searchableCursorEnvironmentId !== undefined
     ) {
       setSelectedEnvironmentId(searchableCursorEnvironmentId);
@@ -347,8 +351,8 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     searchTargetId,
     searchableCursorEnvironmentId,
     searchableEnvironmentId,
-    selectedEnvironment,
     selectedEnvironmentCanRenderSettings,
+    selectedEnvironmentIsMac,
     target.scoped,
   ]);
   const onlyPrimaryDevice =

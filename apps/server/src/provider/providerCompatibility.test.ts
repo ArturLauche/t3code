@@ -54,13 +54,29 @@ const provider: ServerProvider = {
 describe("provider compatibility", () => {
   it("bundles a compatibility policy for every built-in harness", () => {
     for (const builtIn of BUILT_IN_DRIVERS) {
-      assert.isDefined(
-        resolveProviderCompatibility(
-          ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
-          builtIn.driverKind,
-          null,
-        ),
-        `Missing bundled compatibility policy for ${builtIn.driverKind}`,
+      const policy = (ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility ?? []).find(
+        (entry) => entry.driver === builtIn.driverKind,
+      );
+      assert.isDefined(policy, `Missing bundled compatibility policy for ${builtIn.driverKind}`);
+      // A provider that has not been characterized yet is a recorded fact, not
+      // a satisfied invariant: an empty `ranges` list that still resolved to an
+      // advisory would make a future breaking release ship with no warning and
+      // green CI.
+      if (policy?.uncharacterized === true) {
+        assert.lengthOf(policy.ranges, 0, `${builtIn.driverKind} has no characterized versions`);
+        assert.isUndefined(
+          resolveProviderCompatibility(
+            ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+            builtIn.driverKind,
+            "1.2.3",
+          ),
+          `${builtIn.driverKind} is uncharacterized, so it must not publish an advisory`,
+        );
+        continue;
+      }
+      assert.isNotEmpty(
+        policy?.ranges ?? [],
+        `${builtIn.driverKind} needs at least one characterized version range`,
       );
     }
   });

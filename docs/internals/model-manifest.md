@@ -22,6 +22,15 @@ Catalog-aware releases use `providers.claudeAgent.models[].status` instead.
 Codex uses `currentModels.codex` as a legacy-classification overlay for discovered
 models.
 
+`compatibility` declares which CLI versions a provider is known to work with. An
+entry that has no characterized version must say so with `"uncharacterized": true`
+and an empty `ranges`, which the schema requires and which suppresses the
+advisory entirely. An empty `ranges` list without the marker does not: it resolves
+to a permanent `unknown` advisory, which satisfies the "every built-in has a
+policy" test while warning about nothing. Freebuff is the current example — its
+TUI bridge is a screen-scraping integration whose behaviour has not been pinned to
+version ranges.
+
 Model data is schema-validated configuration. Tests should cover resolver, cache,
 and adapter semantics with synthetic model names, so adding a model never requires
 tests that repeat the configuration.

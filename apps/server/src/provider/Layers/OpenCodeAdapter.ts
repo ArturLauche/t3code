@@ -3284,6 +3284,14 @@ export function makeOpenCodeAdapter(
                     system: buildRuntimeInstructions({
                       harness: "OpenCode",
                       model: `${parsedModel.providerID}/${parsedModel.modelID}`,
+                      // The `t3-code` MCP server is only registered for a
+                      // session that has a credential and is not externally
+                      // managed, so the pull-request instructions are omitted
+                      // otherwise rather than pointing at tools that were
+                      // never started.
+                      supportsMcpTooling:
+                        McpProviderSession.readMcpProviderSession(input.threadId) !== null &&
+                        !context.server.external,
                     }),
                     parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
                   },

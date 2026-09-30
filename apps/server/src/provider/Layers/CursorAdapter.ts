@@ -1103,7 +1103,13 @@ export function makeCursorAdapter(
                     ...promptParts,
                     {
                       type: "text",
-                      text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
+                      text: buildRuntimeInstructions({
+                        harness: "Cursor",
+                        model: resolvedModel,
+                        // The session config always carries T3 Code's MCP
+                        // server, so these tools are present.
+                        supportsMcpTooling: true,
+                      }),
                     },
                   ],
             })

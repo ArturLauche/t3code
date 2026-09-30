@@ -29,13 +29,32 @@ const Policy = Schema.Struct({
   t3CodeRange: VersionRange,
   recommendedRange: Schema.optionalKey(VersionRange),
   recommendedVersion: Schema.optionalKey(StableVersion),
+  /**
+   * Set when a provider ships a CLI whose versions have not been characterized
+   * yet. It records the deliberate absence of a policy, so the bundled-policy
+   * invariant below cannot be satisfied by an empty `ranges` list that would
+   * otherwise publish an `unknown` advisory for every version forever.
+   */
+  uncharacterized: Schema.optionalKey(Schema.Boolean),
   ranges: Schema.Array(
     Schema.Struct({
       range: VersionRange,
       status: ServerProviderCompatibilityStatus,
     }),
   ),
-});
+}).pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (policy) =>
+        policy.uncharacterized === true
+          ? policy.ranges.length === 0 && policy.recommendedRange === undefined
+          : policy.ranges.length > 0,
+      {
+        expected: "at least one version range, or an explicit `uncharacterized` marker with none",
+      },
+    ),
+  ),
+);
 
 export const ProviderCompatibilityPolicy = Policy.pipe(
   Schema.check(
@@ -65,7 +84,10 @@ export function resolveProviderCompatibility(
   const policy = policies?.find(
     (entry) => entry.driver === driver && satisfiesSemverRange(t3CodeVersion, entry.t3CodeRange),
   );
-  if (!policy) return undefined;
+  // A provider marked `uncharacterized` has no version this server can judge,
+  // so it produces no advisory at all — as if it had no policy — rather than a
+  // permanent `unknown` one that every consumer would have to learn to ignore.
+  if (!policy || policy.uncharacterized === true) return undefined;
   const unprefixed = version?.replace(/^v/, "");
   // Cursor appends a build hash to its date; Google's ACP runtime uses a release prefix.
   // Strip only these driver-specific forms, keeping semver prereleases unknown.

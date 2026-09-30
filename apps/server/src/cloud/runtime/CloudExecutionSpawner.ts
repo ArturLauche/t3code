@@ -10,6 +10,7 @@ import type {
   ProviderInstanceEnvironment,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
 import * as Semaphore from "effect/Semaphore";
@@ -24,6 +25,8 @@ import { type CloudRuntimeServiceShape } from "./CloudRuntimeService.ts";
 
 const MAX_WORKSPACE_ARCHIVE_BYTES = 100 * 1024 * 1024;
 const MAX_PENDING_PTY_BYTES = 1024 * 1024;
+/** How long a stopped cloud process may take to exit before it is killed. */
+const TERMINATE_GRACE_MS = 5_000;
 
 const archiveLimitError = (): PlatformError.PlatformError =>
   PlatformError.systemError({
@@ -177,10 +180,17 @@ const collectArchive = (
         totalBytes = nextSize;
         chunks.push(chunk);
       });
-    }).pipe(Effect.catch((cause) => handle.kill().pipe(Effect.andThen(Effect.fail(cause)))));
+    });
     const [, , exitCode] = yield* Effect.all(
       [collectStdout, Stream.runDrain(handle.stderr), handle.exitCode],
       { concurrency: "unbounded" },
+    ).pipe(
+      // `tar` is a host process, so it has to die on every non-clean exit: a
+      // size limit, a failed sibling, and an abandoned request all leave it
+      // running and holding the workspace open otherwise.
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) ? Effect.void : handle.kill().pipe(Effect.ignore),
+      ),
     );
     if (Number(exitCode) !== 0) {
       return yield* PlatformError.systemError({
@@ -331,12 +341,25 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
       return cloudProcess;
     });
 
+  /**
+   * Stop a cloud process, escalating so a release never returns while the
+   * vendor keeps billing for it. SIGTERM is the polite path; a provider CLI
+   * that ignores it is killed outright rather than abandoned mid-turn.
+   */
   const terminate = (cloudProcess: CloudProcess) =>
     Effect.suspend(() => {
       if (cloudProcess.completed) return Effect.void;
       cloudProcess.kill("SIGTERM");
-      return Effect.promise(() => cloudProcess.wait()).pipe(
-        Effect.timeoutOption(5_000),
+      const waitForExit = Effect.promise(() => cloudProcess.wait()).pipe(Effect.asVoid);
+      return waitForExit.pipe(
+        Effect.timeoutOption(TERMINATE_GRACE_MS),
+        Effect.flatMap((graceful) =>
+          graceful._tag === "Some" || cloudProcess.completed
+            ? Effect.void
+            : Effect.sync(() => {
+                cloudProcess.kill("SIGKILL");
+              }).pipe(Effect.andThen(waitForExit), Effect.timeoutOption(TERMINATE_GRACE_MS)),
+        ),
         Effect.asVoid,
       );
     });

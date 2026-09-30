@@ -42,6 +42,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
@@ -57,7 +58,11 @@ import {
   isModelSelectionProviderEnabled,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
-import { cloudRuntimeCredentialName } from "./cloud/runtime/credentialName.ts";
+import {
+  cloudRuntimeCredentialName,
+  sameCloudCredentialScope,
+  staleCloudCredentialIds,
+} from "./cloud/runtime/credentialName.ts";
 
 export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
@@ -68,14 +73,8 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-const sameCloudCredentialScope = (
-  previous: CloudRuntimeConfig,
-  next: CloudRuntimeConfig,
-): boolean =>
-  previous.kind === next.kind &&
-  (previous.domain ?? null) === (next.domain ?? null) &&
-  (previous.apiUrl ?? null) === (next.apiUrl ?? null) &&
-  (previous.region ?? null) === (next.region ?? null);
+/** Attempts per drain before a stale credential removal is reported. */
+const CLOUD_CREDENTIAL_REMOVAL_ATTEMPTS = 3;
 
 /**
  * Fold the legacy in-config `enabled` flag into the envelope-level
@@ -1063,6 +1062,86 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /**
+   * Secret removals that a previous attempt could not complete.
+   *
+   * A cloud credential belongs to a vendor and endpoint, so deleting the
+   * runtime — or pointing it at a different vendor — must delete the key with
+   * it. When the secret store refuses, the removal cannot simply be forgotten:
+   * the key would still be in the store, and re-adding the same runtime id
+   * would silently revive it. Pending removals are therefore retried on every
+   * settings materialization, before the new configuration becomes the one
+   * clients are told about.
+   */
+  const pendingCloudCredentialRemovals = yield* Ref.make<ReadonlySet<CloudRuntimeId>>(
+    new Set<CloudRuntimeId>(),
+  );
+
+  const removeCloudCredential = (runtimeId: CloudRuntimeId) =>
+    secretStore.remove(cloudRuntimeCredentialName(runtimeId)).pipe(
+      Effect.tap(() =>
+        Ref.update(pendingCloudCredentialRemovals, (pending) => {
+          const next = new Set(pending);
+          next.delete(runtimeId);
+          return next;
+        }),
+      ),
+    );
+
+  const drainPendingCloudCredentialRemovals = Effect.gen(function* () {
+    const pending = yield* Ref.get(pendingCloudCredentialRemovals);
+    if (pending.size === 0) return;
+    // Sequential: the secret store is the shared resource that just failed.
+    for (const runtimeId of pending) {
+      let failure: unknown;
+      let removed = false;
+      for (let attempt = 0; attempt < CLOUD_CREDENTIAL_REMOVAL_ATTEMPTS; attempt += 1) {
+        const result = yield* removeCloudCredential(runtimeId).pipe(Effect.result);
+        if (Result.isSuccess(result)) {
+          removed = true;
+          break;
+        }
+        failure = result.failure;
+      }
+      if (removed) continue;
+      // A persistent failure is reported here and stays pending, so the id
+      // cannot be re-added and silently revive the old key.
+      yield* Effect.logError(
+        "A removed cloud runtime credential is still in the secret store. Re-adding that runtime id will reuse it until the removal succeeds.",
+        {
+          runtimeId,
+          secretName: cloudRuntimeCredentialName(runtimeId),
+          cause: Cause.pretty(Cause.fail(failure)),
+        },
+      );
+    }
+  });
+
+  const removeStaleCloudCredentials = Effect.fnUntraced(function* (
+    previous: ServerSettings,
+    next: ServerSettings,
+  ) {
+    for (const runtimeId of staleCloudCredentialIds(
+      previous.cloudRuntimeInstances,
+      next.cloudRuntimeInstances,
+    )) {
+      yield* Ref.update(pendingCloudCredentialRemovals, (pending) => {
+        const pendingNext = new Set(pending);
+        pendingNext.add(runtimeId);
+        return pendingNext;
+      });
+      yield* removeCloudCredential(runtimeId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to remove stale cloud credential", {
+            runtimeId,
+            cause,
+          }),
+        ),
+      );
+    }
+    yield* drainPendingCloudCredentialRemovals;
+  });
+
   const updateSettings = (
     patch: ServerSettingsPatch,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
@@ -1092,30 +1171,14 @@ const make = Effect.gen(function* () {
             return materializedExit.value;
           }),
         );
+        // Retried before the new configuration becomes authoritative: a
+        // removal an earlier attempt could not finish must land before the
+        // same runtime id can be configured again.
+        yield* drainPendingCloudCredentialRemovals;
         yield* Cache.set(settingsCache, cacheKey, next);
         yield* emitChange(next);
         return resolveTextGenerationProvider(materialized);
       }),
-    );
-
-  const removeStaleCloudCredentials = (
-    previous: ServerSettings,
-    next: ServerSettings,
-  ): Effect.Effect<void> =>
-    Effect.forEach(
-      Object.keys(previous.cloudRuntimeInstances).filter(
-        (runtimeId) => !(runtimeId in next.cloudRuntimeInstances),
-      ),
-      (runtimeId) =>
-        secretStore.remove(cloudRuntimeCredentialName(runtimeId as CloudRuntimeId)).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("failed to remove stale cloud credential", {
-              runtimeId,
-              cause,
-            }),
-          ),
-        ),
-      { discard: true },
     );
 
   const revalidateAndEmit = writeSemaphore.withPermits(1)(

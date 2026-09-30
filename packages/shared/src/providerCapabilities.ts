@@ -183,16 +183,39 @@ export function getUnsupportedProviderAttachmentReason(input: {
   return null;
 }
 
-export type UnsupportedProviderInputKind = "mode" | "attachment";
+export type UnsupportedProviderInputKind = "mode" | "attachment" | "unknown";
 
-/** Single source for the composer's send gate and its banner copy. */
+/** A queued turn that cannot be sent yet, and the state that explains it. */
+export interface UnsupportedProviderInput {
+  readonly kind: UnsupportedProviderInputKind;
+  readonly reason: string;
+}
+
+/**
+ * Single source for the composer's send gate and its banner copy.
+ *
+ * `capabilityUnknown` is the distinction that matters most here. A provider
+ * snapshot that has not loaded is not the same thing as a provider that
+ * supports everything, and only the caller knows which it has: the composer
+ * blocks on a null provider anyway, so it passes `false`, while a background
+ * queue drain — which fires with no composer on screen and no provider picker
+ * to consult — must pass `true` rather than assume the permissive default.
+ */
 export function getUnsupportedProviderInputReason(input: {
   readonly provider: ProviderCapabilitySnapshot | null | undefined;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode | undefined;
   readonly attachmentCount: number;
   readonly fileCount?: number;
-}): { readonly kind: UnsupportedProviderInputKind; readonly reason: string } | null {
+  readonly capabilityUnknown?: boolean;
+}): UnsupportedProviderInput | null {
+  if (input.capabilityUnknown === true) {
+    return {
+      kind: "unknown",
+      reason:
+        "Waiting for this environment's provider capabilities. Retry once the connection has settled.",
+    };
+  }
   const modeReason = getUnsupportedProviderModeReason(input);
   if (modeReason !== null) return { kind: "mode", reason: modeReason };
   const attachmentReason = getUnsupportedProviderAttachmentReason(input);
@@ -202,12 +225,13 @@ export function getUnsupportedProviderInputReason(input: {
 
 export function getUnsupportedProviderInputBannerCopy(restriction: {
   readonly kind: UnsupportedProviderInputKind;
-  readonly reason: string;
 }): { readonly title: string } {
-  return {
-    title:
-      restriction.kind === "attachment"
-        ? "Image attachments unavailable"
-        : "Provider mode unavailable",
-  };
+  switch (restriction.kind) {
+    case "attachment":
+      return { title: "Image attachments unavailable" };
+    case "unknown":
+      return { title: "Waiting for the server" };
+    default:
+      return { title: "Provider mode unavailable" };
+  }
 }

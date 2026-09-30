@@ -141,6 +141,7 @@ import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import { CloudRuntimeServiceLive } from "./cloud/runtime/CloudRuntimeServiceLive.ts";
+import { CloudSandboxRetirementLive } from "./cloud/runtime/CloudSandboxRetirement.ts";
 import {
   MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER,
   MANAGED_TUNNEL_RECOVERY_COOLDOWN,
@@ -199,7 +200,12 @@ const ServerSettingsLayerLive = ServerSettings.layer.pipe(
   Layer.provideMerge(SqlitePersistenceLayerLive),
 );
 
-const CloudRuntimeLayerLive = CloudRuntimeServiceLive.pipe(
+const CloudRuntimeLayerLive = Layer.mergeAll(
+  CloudRuntimeServiceLive,
+  // Owns nothing a client sees; it only deletes sandboxes a runtime can no
+  // longer reach after its vendor identity changes.
+  CloudSandboxRetirementLive,
+).pipe(
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ServerSecretStore.layer),
   Layer.provideMerge(ServerEnvironment.identityLayer),
@@ -764,6 +770,12 @@ const makeServerLayer = Layer.unwrap(
         }
         yield* forkParked(
           Effect.gen(function* () {
+            // A host with no relay endpoint and no OAuth client can never link
+            // T3 Connect, so there is nothing to reconcile: without this the
+            // fiber still pays the first-registration jitter on the
+            // `auxiliary-roots.parked` startup gate and registers finalizers
+            // for a tunnel this host can never own.
+            if (!hasCloudPublicConfig) return;
             if (!cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel);
             }

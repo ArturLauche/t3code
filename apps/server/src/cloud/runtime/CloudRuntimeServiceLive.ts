@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
@@ -28,6 +29,7 @@ import * as Predicate from "effect/Predicate";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { cloudRuntimeCredentialName } from "./credentialName.ts";
+import { isManagedSandbox } from "./sandboxOwnership.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { CloudRuntimeService, type CloudRuntimeServiceShape } from "./CloudRuntimeService.ts";
 import {
@@ -38,6 +40,14 @@ import {
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+/**
+ * The only sandbox states a turn may be run on. Everything else, including the
+ * `unknown` this server assigns to a state string it does not recognise, is
+ * treated as unusable: uploading a workspace and starting an agent on a
+ * sandbox whose state nobody verified is worse than creating a fresh one.
+ */
+const isReusableSandboxState = (state: CloudSandboxSummary["state"]): boolean =>
+  state === "running" || state === "paused";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -168,7 +178,10 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
       ),
     );
 
-  const requireConfig = Effect.fnUntraced(function* (runtimeId: CloudRuntimeId) {
+  const resolveConfig = Effect.fnUntraced(function* (
+    runtimeId: CloudRuntimeId,
+    options?: { readonly requireEnabled?: boolean },
+  ) {
     const settings = yield* getSettings(runtimeId);
     const config = settings.cloudRuntimeInstances[runtimeId];
     if (!config) {
@@ -179,7 +192,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
         message: "The cloud runtime is not configured.",
       });
     }
-    if (!config.enabled) {
+    if (options?.requireEnabled !== false && !config.enabled) {
       return yield* new CloudRuntimeError({
         runtimeId,
         operation: "resolve-runtime",
@@ -190,23 +203,34 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
     return { config, apiKey: yield* readCredential(runtimeId) };
   });
 
-  const makeVendorFor = Effect.fnUntraced(function* (runtimeId: CloudRuntimeId) {
-    const { config, apiKey } = yield* requireConfig(runtimeId);
-    if (!apiKey) {
-      return yield* new CloudRuntimeError({
-        runtimeId,
-        operation: "authenticate",
-        reason: "credential_missing",
-        message: "Add an API key for this cloud runtime.",
+  /**
+   * Execution requires an enabled runtime; sandbox lifecycle does not.
+   *
+   * `enabled` means "do not run turns here", not "forget the account". A
+   * disabled runtime's sandboxes keep billing, and pausing or deleting them is
+   * the only way to stop that, so `listSandboxes` and `sandboxAction` pass
+   * `requireEnabled: false` and keep reaching the vendor.
+   */
+  const requireConfig = (runtimeId: CloudRuntimeId) => resolveConfig(runtimeId);
+
+  const makeVendorFor = (runtimeId: CloudRuntimeId, options?: { requireEnabled?: boolean }) =>
+    Effect.gen(function* () {
+      const { config, apiKey } = yield* resolveConfig(runtimeId, options);
+      if (!apiKey) {
+        return yield* new CloudRuntimeError({
+          runtimeId,
+          operation: "authenticate",
+          reason: "credential_missing",
+          message: "Add an API key for this cloud runtime.",
+        });
+      }
+      const vendor = yield* Effect.try({
+        try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
+        catch: (cause) =>
+          mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
       });
-    }
-    const vendor = yield* Effect.try({
-      try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
-      catch: (cause) =>
-        mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
+      return { vendor, apiKey };
     });
-    return { vendor, apiKey };
-  });
 
   const closeVendor = (vendor: CloudVendorAdapter): Effect.Effect<void> =>
     vendor.close
@@ -221,61 +245,107 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
       vendor: CloudVendorAdapter,
       context: { readonly apiKey: string },
     ) => Effect.Effect<A, E, R>,
+    options?: { readonly requireEnabled?: boolean },
   ): Effect.Effect<A, E | CloudRuntimeError, R> =>
     Effect.scoped(
-      Effect.acquireRelease(makeVendorFor(runtimeId), ({ vendor }) => closeVendor(vendor)).pipe(
-        Effect.flatMap(({ vendor, apiKey }) => use(vendor, { apiKey })),
+      Effect.acquireRelease(makeVendorFor(runtimeId, options), ({ vendor }) =>
+        closeVendor(vendor),
+      ).pipe(Effect.flatMap(({ vendor, apiKey }) => use(vendor, { apiKey }))),
+    );
+
+  /**
+   * A sandbox that failed setup is still a paid sandbox. Deleting it is the
+   * only thing standing between a failed turn and a billing surprise, so a
+   * failed delete is reported rather than dropped: the operator needs to know
+   * which sandbox to remove by hand.
+   */
+  const cleanupPreparedSandbox = (runtimeId: CloudRuntimeId, sandboxId: string) =>
+    useVendor(
+      runtimeId,
+      (vendor) => Effect.promise(() => vendor.action(sandboxId, "delete")).pipe(Effect.asVoid),
+      { requireEnabled: false },
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("Failed to delete a cloud sandbox after a failed preparation.", {
+          runtimeId,
+          sandboxId,
+          cause,
+        }),
       ),
     );
 
-  const cleanupPreparedSandbox = (runtimeId: CloudRuntimeId, sandboxId: string) =>
-    useVendor(runtimeId, (vendor, { apiKey }) =>
-      Effect.tryPromise({
-        try: () => vendor.action(sandboxId, "delete"),
-        catch: (cause) =>
-          mapVendorError({ runtimeId, operation: "cleanup-sandbox", cause, secrets: [apiKey] }),
-      }).pipe(Effect.asVoid),
-    ).pipe(Effect.catchCause(() => Effect.void));
+  const ownsSandbox = (sandbox: CloudSandboxSummary, runtimeId: CloudRuntimeId): boolean =>
+    isManagedSandbox(sandbox, runtimeId, environmentId);
 
-  const isManagedSandbox = (sandbox: CloudSandboxSummary, runtimeId: CloudRuntimeId): boolean =>
-    sandbox.metadata?.t3ManagedExecution === "true" &&
-    sandbox.metadata?.t3RuntimeId === runtimeId &&
-    sandbox.metadata?.t3EnvironmentId === environmentId;
+  /** Keeps only this runtime's sandboxes, and only the metadata clients may see. */
+  const stampSandboxes = (runtimeId: CloudRuntimeId) =>
+    Effect.map(
+      (sandboxes: ReadonlyArray<CloudSandboxSummary>): ReadonlyArray<CloudSandboxSummary> =>
+        sandboxes
+          .filter((sandbox) => ownsSandbox(sandbox, runtimeId))
+          .map((sandbox) => {
+            const { metadata: _metadata, ...withoutMetadata } = sandbox;
+            const metadata = publicSandboxMetadata(sandbox.metadata);
+            return {
+              ...withoutMetadata,
+              runtimeId,
+              ...(metadata ? { metadata } : {}),
+            };
+          }),
+    );
 
-  const stampSandboxes = (
+  /**
+   * Ownership is decided by server-stamped vendor metadata, never by anything
+   * the client sends. A sandbox id alone would let one environment act on a
+   * sandbox that shares the vendor account with it, and the vendor account can
+   * legitimately be shared across environments.
+   */
+  const requireOwnedSandbox = Effect.fnUntraced(function* (
     runtimeId: CloudRuntimeId,
-    sandboxes: ReadonlyArray<CloudSandboxSummary>,
-  ): ReadonlyArray<CloudSandboxSummary> =>
-    sandboxes
-      .filter((sandbox) => isManagedSandbox(sandbox, runtimeId))
-      .map((sandbox) => {
-        const { metadata: _metadata, ...withoutMetadata } = sandbox;
-        const metadata = publicSandboxMetadata(sandbox.metadata);
-        return {
-          ...withoutMetadata,
-          runtimeId,
-          ...(metadata ? { metadata } : {}),
-        };
+    sandboxId: string,
+    vendor: CloudVendorAdapter,
+    apiKey: string,
+    operation: string,
+  ) {
+    const owned = yield* Effect.tryPromise({
+      try: () => vendor.listSandboxes(),
+      catch: (cause) =>
+        mapVendorError({ runtimeId, operation: "list-sandboxes", cause, secrets: [apiKey] }),
+    });
+    if (
+      !owned.some((sandbox) => sandbox.sandboxId === sandboxId && ownsSandbox(sandbox, runtimeId))
+    ) {
+      return yield* new CloudRuntimeError({
+        runtimeId,
+        operation,
+        reason: "sandbox_not_found",
+        message: "The sandbox does not belong to this cloud runtime.",
       });
+    }
+  });
+
+  const listSandboxesFor = (
+    runtimeId: CloudRuntimeId,
+    config: CloudRuntimeConfig,
+    apiKey: string,
+  ) =>
+    Effect.tryPromise({
+      try: async () => {
+        const vendor = makeVendor({ runtimeId, config, apiKey, environmentId });
+        try {
+          return await vendor.listSandboxes();
+        } finally {
+          await vendor.close?.();
+        }
+      },
+      catch: (cause) => mapVendorError({ runtimeId, operation: "list", cause, secrets: [apiKey] }),
+    }).pipe(stampSandboxes(runtimeId));
 
   const listOne = Effect.fnUntraced(function* (
     runtimeId: CloudRuntimeId,
     config: CloudRuntimeConfig,
   ) {
     const checkedAt = yield* nowIso;
-    if (!config.enabled) {
-      return {
-        id: runtimeId,
-        config,
-        hasCredential: (yield* readCredential(runtimeId)) !== "",
-        health: {
-          status: "disabled",
-          message: "Cloud runtime is disabled.",
-          checkedAt,
-        } satisfies CloudRuntimeHealth,
-        sandboxes: [],
-      } satisfies CloudRuntimeInstance;
-    }
     const apiKey = yield* readCredential(runtimeId);
     if (!apiKey) {
       return {
@@ -283,19 +353,45 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
         config,
         hasCredential: false,
         health: {
-          status: "unconfigured",
-          message: "Add an API key to test this cloud runtime.",
+          // A disabled runtime is not a configuration problem, so the reason
+          // to add a key is only given when one is actually needed.
+          status: config.enabled ? "unconfigured" : "disabled",
+          message: config.enabled
+            ? "Add an API key to test this cloud runtime."
+            : "Cloud runtime is disabled.",
           checkedAt,
         } satisfies CloudRuntimeHealth,
         sandboxes: [],
       } satisfies CloudRuntimeInstance;
     }
-    return yield* Effect.tryPromise({
-      try: async () => {
-        const vendor = makeVendor({ runtimeId, config, apiKey, environmentId });
-        try {
-          const sandboxes = await vendor.listSandboxes();
-          return {
+    const listSandboxes = listSandboxesFor(runtimeId, config, apiKey);
+    if (!config.enabled) {
+      // Still enumerate: a disabled runtime's sandboxes keep billing, and
+      // hiding them would leave no way to stop that from T3.
+      const sandboxes = yield* listSandboxes.pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Failed to list the sandboxes of a disabled cloud runtime.", {
+            runtimeId,
+            cause: error,
+          }).pipe(Effect.as([])),
+        ),
+      );
+      return {
+        id: runtimeId,
+        config,
+        hasCredential: true,
+        health: {
+          status: "disabled",
+          message: "Cloud runtime is disabled.",
+          checkedAt,
+        } satisfies CloudRuntimeHealth,
+        sandboxes,
+      } satisfies CloudRuntimeInstance;
+    }
+    return yield* listSandboxes.pipe(
+      Effect.map(
+        (sandboxes) =>
+          ({
             id: runtimeId,
             config,
             hasCredential: true,
@@ -304,14 +400,9 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
               message: null,
               checkedAt,
             } satisfies CloudRuntimeHealth,
-            sandboxes: stampSandboxes(runtimeId, sandboxes),
-          } satisfies CloudRuntimeInstance;
-        } finally {
-          await vendor.close?.();
-        }
-      },
-      catch: (cause) => mapVendorError({ runtimeId, operation: "list", cause, secrets: [apiKey] }),
-    }).pipe(
+            sandboxes,
+          }) satisfies CloudRuntimeInstance,
+      ),
       Effect.catch((error) =>
         Effect.succeed({
           id: runtimeId,
@@ -372,22 +463,16 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
   const clearCredential = Effect.fn("CloudRuntimeService.clearCredential")(function* (
     runtimeId: CloudRuntimeId,
   ) {
+    // Clearing is intentionally idempotent. Settings deletion and secret
+    // cleanup can arrive in either order when a client removes a runtime.
     yield* withSettingsWriteLock(
-      Effect.gen(function* () {
-        // Clearing is intentionally idempotent. Settings deletion and secret
-        // cleanup can arrive in either order when a client removes a runtime.
-        yield* secretStore
-          .remove(credentialName(runtimeId))
-          .pipe(
-            Effect.mapError((_cause) =>
-              settingsError(
-                runtimeId,
-                "clear-credential",
-                "Failed to remove the cloud credential.",
-              ),
-            ),
-          );
-      }),
+      secretStore
+        .remove(credentialName(runtimeId))
+        .pipe(
+          Effect.mapError((_cause) =>
+            settingsError(runtimeId, "clear-credential", "Failed to remove the cloud credential."),
+          ),
+        ),
     );
     return yield* list();
   });
@@ -429,36 +514,24 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
       }),
     );
     return yield* listSandboxes({ runtimeId: input.runtimeId }).pipe(
-      Effect.onError(() => cleanupPreparedSandbox(input.runtimeId, created.sandboxId)),
+      // A non-success exit, not `onError`: a request the client abandoned has
+      // already created a paid sandbox and needs the same cleanup. Success
+      // keeps the sandbox, which is the point of creating it here.
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit)
+          ? Effect.void
+          : cleanupPreparedSandbox(input.runtimeId, created.sandboxId),
+      ),
     );
   });
 
   const listSandboxes = Effect.fn("CloudRuntimeService.listSandboxes")(function* (
     input: CloudRuntimeSandboxListInput,
   ) {
-    const sandboxes = yield* useVendor(input.runtimeId, (vendor, { apiKey }) =>
-      Effect.tryPromise({
-        try: () => vendor.listSandboxes(),
-        catch: (cause) =>
-          mapVendorError({
-            runtimeId: input.runtimeId,
-            operation: "list-sandboxes",
-            cause,
-            secrets: [apiKey],
-          }),
-      }),
-    );
-    return {
-      sandboxes: stampSandboxes(input.runtimeId, sandboxes),
-    } satisfies CloudRuntimeSandboxListResult;
-  });
-
-  const sandboxAction = Effect.fn("CloudRuntimeService.sandboxAction")(function* (
-    input: CloudRuntimeSandboxActionInput,
-  ) {
-    yield* useVendor(input.runtimeId, (vendor, { apiKey }) =>
-      Effect.gen(function* () {
-        const owned = yield* Effect.tryPromise({
+    const sandboxes = yield* useVendor(
+      input.runtimeId,
+      (vendor, { apiKey }) =>
+        Effect.tryPromise({
           try: () => vendor.listSandboxes(),
           catch: (cause) =>
             mapVendorError({
@@ -467,31 +540,40 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
               cause,
               secrets: [apiKey],
             }),
-        });
-        if (
-          !owned.some(
-            (sandbox) =>
-              sandbox.sandboxId === input.sandboxId && isManagedSandbox(sandbox, input.runtimeId),
-          )
-        ) {
-          return yield* new CloudRuntimeError({
-            runtimeId: input.runtimeId,
-            operation: `${input.action}-sandbox`,
-            reason: "sandbox_not_found",
-            message: "The sandbox does not belong to this cloud runtime.",
-          });
-        }
-        yield* Effect.tryPromise({
-          try: () => vendor.action(input.sandboxId, input.action),
-          catch: (cause) =>
-            mapVendorError({
-              runtimeId: input.runtimeId,
-              operation: `${input.action}-sandbox`,
-              cause,
-              secrets: [apiKey],
-            }),
-        }).pipe(Effect.asVoid);
-      }),
+        }).pipe(stampSandboxes(input.runtimeId)),
+      { requireEnabled: false },
+    );
+    return { sandboxes } satisfies CloudRuntimeSandboxListResult;
+  });
+
+  const sandboxAction = Effect.fn("CloudRuntimeService.sandboxAction")(function* (
+    input: CloudRuntimeSandboxActionInput,
+  ) {
+    yield* useVendor(
+      input.runtimeId,
+      (vendor, { apiKey }) =>
+        Effect.gen(function* () {
+          yield* requireOwnedSandbox(
+            input.runtimeId,
+            input.sandboxId,
+            vendor,
+            apiKey,
+            `${input.action}-sandbox`,
+          );
+          yield* Effect.tryPromise({
+            try: () => vendor.action(input.sandboxId, input.action),
+            catch: (cause) =>
+              mapVendorError({
+                runtimeId: input.runtimeId,
+                operation: `${input.action}-sandbox`,
+                cause,
+                secrets: [apiKey],
+              }),
+          }).pipe(Effect.asVoid);
+        }),
+      // Lifecycle stays reachable on a disabled runtime: pausing or deleting
+      // a sandbox that is still billing is the whole point of disabling one.
+      { requireEnabled: false },
     );
     return yield* listSandboxes({ runtimeId: input.runtimeId });
   });
@@ -501,29 +583,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
   ) {
     const result = yield* useVendor(input.runtimeId, (vendor, { apiKey }) =>
       Effect.gen(function* () {
-        const owned = yield* Effect.tryPromise({
-          try: () => vendor.listSandboxes(),
-          catch: (cause) =>
-            mapVendorError({
-              runtimeId: input.runtimeId,
-              operation: "list-sandboxes",
-              cause,
-              secrets: [apiKey],
-            }),
-        });
-        if (
-          !owned.some(
-            (sandbox) =>
-              sandbox.sandboxId === input.sandboxId && isManagedSandbox(sandbox, input.runtimeId),
-          )
-        ) {
-          return yield* new CloudRuntimeError({
-            runtimeId: input.runtimeId,
-            operation: "execute",
-            reason: "sandbox_not_found",
-            message: "The sandbox does not belong to this cloud runtime.",
-          });
-        }
+        yield* requireOwnedSandbox(input.runtimeId, input.sandboxId, vendor, apiKey, "execute");
         return yield* Effect.tryPromise({
           try: () =>
             vendor.execute(input.sandboxId, {
@@ -577,8 +637,11 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
               candidate.metadata?.t3EnvironmentId === environmentId &&
               candidate.metadata.t3SetupHash === setupHashValue &&
               candidate.metadata.t3ProviderInstanceId === input.metadata?.t3ProviderInstanceId &&
-              candidate.state !== "stopped" &&
-              candidate.state !== "error",
+              // Only the two states a sandbox can be reused from. `unknown` is
+              // deliberately excluded: it means this build did not recognise
+              // the vendor's state string, and reusing an unrecognised sandbox
+              // would run a turn on a machine whose state nobody verified.
+              isReusableSandboxState(candidate.state),
           );
           if (existing) {
             if (existing.state === "paused") await vendor.action(existing.sandboxId, "resume");
@@ -605,6 +668,10 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
       }),
     );
     const { sandbox, created } = preparedSandbox;
+    // A reused sandbox is not this call's to delete: an interrupted turn
+    // preparation must not tear down a sandbox the next turn is using.
+    const discardOnFailure = () =>
+      created ? cleanupPreparedSandbox(input.runtimeId, sandbox.sandboxId) : Effect.void;
     return yield* Effect.gen(function* () {
       const remoteCwd = `/workspace/${input.name.replaceAll(/[^a-zA-Z0-9_-]/gu, "-")}`;
       const remoteHome = `/tmp/t3-home-${sandbox.sandboxId.replaceAll(/[^a-zA-Z0-9_-]/gu, "-")}`;
@@ -674,13 +741,18 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
         remoteHome,
         owned: true,
       } satisfies CloudExecutionHandle;
-    }).pipe(
-      Effect.onError(() =>
-        created ? cleanupPreparedSandbox(input.runtimeId, sandbox.sandboxId) : Effect.void,
-      ),
-    );
+      // A non-success exit, not `onError`: an interrupted preparation has
+      // already created a paid sandbox and needs the same cleanup as a failed
+      // one. Success keeps the sandbox for the turn that is about to use it.
+    }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : discardOnFailure())));
   });
 
+  /**
+   * The vendor client outlives the spawn call, so its ownership is explicit:
+   * the returned process closes it once the process exits. A failure or an
+   * interruption before that handover closes it here instead, which
+   * `Effect.onError` alone would miss.
+   */
   const startProcess = Effect.fn("CloudRuntimeService.startProcess")(function* (
     runtimeId: CloudRuntimeId,
     sandboxId: string,
@@ -695,49 +767,39 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
         message: "Add an API key for this cloud runtime.",
       });
     }
-    const vendor = yield* Effect.try({
-      try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
-      catch: (cause) =>
-        mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
-    });
-    const owned = yield* Effect.tryPromise({
-      try: () => vendor.listSandboxes(),
-      catch: (cause) =>
-        mapVendorError({ runtimeId, operation: "list-sandboxes", cause, secrets: [apiKey] }),
-    }).pipe(Effect.onError(() => closeVendor(vendor)));
-    if (
-      !owned.some(
-        (sandbox) => sandbox.sandboxId === sandboxId && isManagedSandbox(sandbox, runtimeId),
-      )
-    ) {
-      yield* closeVendor(vendor);
-      return yield* new CloudRuntimeError({
-        runtimeId,
-        operation: "start-process",
-        reason: "sandbox_not_found",
-        message: "The sandbox does not belong to this cloud runtime.",
-      });
-    }
-    return yield* Effect.tryPromise({
-      try: () => vendor.startProcess(sandboxId, command),
-      catch: (cause) =>
-        mapVendorError({
-          runtimeId,
-          operation: "start-process",
-          cause,
-          secrets: [apiKey, ...Object.values(command.env)],
-        }),
-    }).pipe(
-      Effect.onError(() => closeVendor(vendor)),
-      Effect.tap((process) =>
-        Effect.sync(() => {
-          void process.wait().then(
-            () => Effect.runPromise(closeVendor(vendor)),
-            () => Effect.runPromise(closeVendor(vendor)),
-          );
+    const { vendor } = yield* makeVendorFor(runtimeId);
+    const cloudProcess = yield* requireOwnedSandbox(
+      runtimeId,
+      sandboxId,
+      vendor,
+      apiKey,
+      "start-process",
+    ).pipe(
+      Effect.flatMap(() =>
+        Effect.tryPromise({
+          try: () => vendor.startProcess(sandboxId, command),
+          catch: (cause) =>
+            mapVendorError({
+              runtimeId,
+              operation: "start-process",
+              cause,
+              secrets: [apiKey, ...Object.values(command.env)],
+            }),
         }),
       ),
+      Effect.onError(() => closeVendor(vendor)),
     );
+    // Closing the client is a promise the spawn call cannot make on the
+    // process's behalf, so it is handed to a detached fiber rather than run
+    // from a nested `Effect.runPromise` (which would resolve services outside
+    // the surrounding context).
+    yield* Effect.forkDetach(
+      Effect.promise(() => cloudProcess.wait()).pipe(
+        Effect.ignore,
+        Effect.andThen(closeVendor(vendor)),
+      ),
+    );
+    return cloudProcess;
   });
 
   return {

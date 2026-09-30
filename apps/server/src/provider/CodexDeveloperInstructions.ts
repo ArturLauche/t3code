@@ -220,7 +220,13 @@ export function buildCodexAdditionalContext(
   return {
     t3_code_runtime: {
       kind: "application",
-      value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
+      // The pull-request instructions name MCP tools, so they ride the same
+      // signal as the other tool blocks rather than assuming a server exists.
+      value: buildRuntimeInstructions({
+        harness: "Codex",
+        ...runtime,
+        supportsMcpTooling: toolsAvailable === true,
+      }),
     },
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
   };

@@ -250,12 +250,17 @@ export default defineConfig({
                 "text-[length:80cqh]",
                 // The platform's own selection colour on a selected composer chip.
                 "bg-[Highlight]",
-                // Brand marks keep their brand colours (Cursor, Grok, Claude).
+                // Brand marks keep their brand colours (Cursor, Grok, Claude,
+                // Cline), filled and stroked alike: a stroke is as much part of
+                // a logo as a fill. `Icons.tsx` is where new icons land, so
+                // these are named values rather than a whole-file exemption.
                 "fill-[#26251E]",
                 "fill-[#EDECEC]",
                 "fill-[#0F0F0F]",
                 "fill-[#F5F5F5]",
                 "fill-[#d97757]",
+                "stroke-[#0F0F0F]",
+                "stroke-[#F5F5F5]",
                 "text-[#d97757]",
               ],
             },
@@ -280,12 +285,6 @@ export default defineConfig({
       {
         // The sign-in masthead is T3 brand artwork: fixed gradients, not theme surfaces.
         files: ["apps/web/src/components/auth/AuthSurfaceShell.tsx"],
-        rules: { "shadcn/no-arbitrary-values": "off" },
-      },
-      {
-        // Same reasoning for the third-party marks that are stroked rather than
-        // filled: a brand stroke is part of the logo, so it keeps its exact color.
-        files: ["apps/web/src/components/Icons.tsx", "apps/web/src/components/JetBrainsIcons.tsx"],
         rules: { "shadcn/no-arbitrary-values": "off" },
       },
       {

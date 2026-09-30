@@ -58,8 +58,12 @@ const TURN_TIMEOUT_MS = 60 * 60_000;
 const PROCESS_STOP_GRACE_MS = 2_000;
 const TERMINAL_COLUMNS = 160;
 const TERMINAL_ROWS = 48;
-const TERMINAL_SCROLLBACK = 10_000;
+// The classifier only reads the last `CLASSIFICATION_SCREEN_LINES`, and the
+// extractor works from the text snapshot, so a scrollback much larger than the
+// text window only costs a full re-stringification of the whole buffer on every
+// parsed write.
 const TERMINAL_TEXT_LINES = 4_000;
+const TERMINAL_SCROLLBACK = TERMINAL_TEXT_LINES;
 const MAX_VISIBLE_TEXT_LENGTH = 200_000;
 const MAX_RETAINED_TURNS = 100;
 const CLASSIFICATION_SCREEN_LINES = 120;
@@ -153,10 +157,20 @@ const stripTerminalBorder = (line: string): string => {
 const screenTail = (screen: string): string =>
   screen.split("\n").slice(-CLASSIFICATION_SCREEN_LINES).join("\n");
 
+/**
+ * Chrome the unauthenticated CLI renders on its own.
+ *
+ * Every pattern is anchored to the whole line with an optional trailing
+ * punctuation suffix. That is what the real TUI emits — `Open this URL in your
+ * browser to login:` and `Waiting for login...` on 0.1.6 — and anchoring is
+ * also what keeps a turn about authentication from failing: a user's prompt or
+ * an answer that happens to mention signing in is part of the conversation, not
+ * an overlay. See `freebuffScreens.ts` for the captured output.
+ */
 const AUTHENTICATION_SCREEN_PATTERNS = [
-  /^\s*press\s+enter\s+to\s+login\s*(?:\.{3}|…)?\s*$/iu,
-  /^\s*open\s+this\s+url(?:\s+in\s+your\s+browser)?\s+to\s+login\s*$/iu,
-  /^\s*waiting\s+for\s+login\s*$/iu,
+  /^\s*press\s+enter\s+to\s+login\b[^a-z]*$/iu,
+  /^\s*open\s+this\s+url(?:\s+in\s+your\s+browser)?\s+to\s+login:?[^a-z]*$/iu,
+  /^\s*waiting\s+for\s+login\b[^a-z]*$/iu,
   /^\s*(?:not\s+authenticated|authentication\s+required|login\s+required)\s*$/iu,
   /^\s*found\s+api\s+key\s+but\s+it\s+(?:appears\s+to\s+be|is)\s+invalid\s*$/iu,
 ] as const;
@@ -936,11 +950,20 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
     Effect.gen(function* () {
       if (context.stopped) return;
       const renderedScreen = context.renderedScreen();
-      const rawScreenState = classifyFreebuffScreen(screenTail(screen));
-      const currentScreen = renderedScreen.length > 0 ? renderedScreen : screen;
+      // Classification reads the event, which between a PTY write and the
+      // terminal's parse callback is the raw chunk and is therefore the
+      // freshest view of the screen.
+      const eventState = classifyFreebuffScreen(screenTail(screen));
+      // Text is only ever taken from the rendered screen. A raw chunk is
+      // escape-laden bytes: it can match a gate pattern inside a partially
+      // painted line, and treating that as the screen would publish the
+      // terminal's own control sequences as the assistant's answer and seed
+      // the next turn's baseline with them. Before the first parse there is no
+      // rendered screen, so `lastScreen` stays empty until one exists.
+      const currentScreen = renderedScreen;
       const now = yield* Clock.currentTimeMillis;
       const active = yield* Ref.get(context.activeTurn);
-      yield* Ref.set(context.lastScreen, currentScreen);
+      if (currentScreen.length > 0) yield* Ref.set(context.lastScreen, currentScreen);
       if (active) {
         active.latestScreen = currentScreen;
         if (now >= active.deadlineAt) {
@@ -953,9 +976,9 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
       }
 
       const screenState =
-        rawScreenState.kind === "unknown"
+        eventState.kind === "unknown" && currentScreen.length > 0
           ? classifyFreebuffScreen(screenTail(currentScreen))
-          : rawScreenState;
+          : eventState;
       if (
         (screenState.kind === "authentication" || screenState.kind === "blocked") &&
         (!active?.submitted || !hasFreebuffChatGate(currentScreen))
@@ -988,7 +1011,7 @@ export const makeFreebuffAdapter = Effect.fn("makeFreebuffAdapter")(function* (i
           active.output,
           extractVisibleAssistantText({
             baseline: active.baseline,
-            current: renderedScreen || currentScreen,
+            current: currentScreen,
             prompt: active.userPrompt,
           }),
         );

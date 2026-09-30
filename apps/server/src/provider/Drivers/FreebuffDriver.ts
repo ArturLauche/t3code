@@ -1,5 +1,4 @@
 import { FreebuffSettings } from "@t3tools/contracts";
-import { TextGenerationError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -10,7 +9,7 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import type * as TextGeneration from "../../textGeneration/TextGeneration.ts";
+import { makeUnsupportedTextGeneration } from "../../textGeneration/unsupportedTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeFreebuffAdapter } from "../Layers/FreebuffAdapter.ts";
 import {
@@ -52,28 +51,6 @@ export const freebuffCredentialsHaveToken = (raw: string): boolean => {
     return false;
   }
 };
-
-type UnsupportedTextGenerationOperation =
-  | "generateCommitMessage"
-  | "generatePrContent"
-  | "generateBranchName"
-  | "generateThreadTitle";
-
-const unsupportedTextGeneration = (operation: UnsupportedTextGenerationOperation) =>
-  Effect.fail(
-    new TextGenerationError({
-      operation,
-      detail:
-        "Freebuff does not expose a machine-readable text-generation API; use a Freebuff agent thread instead.",
-    }),
-  );
-
-const textGeneration = {
-  generateCommitMessage: () => unsupportedTextGeneration("generateCommitMessage"),
-  generatePrContent: () => unsupportedTextGeneration("generatePrContent"),
-  generateBranchName: () => unsupportedTextGeneration("generateBranchName"),
-  generateThreadTitle: () => unsupportedTextGeneration("generateThreadTitle"),
-} satisfies TextGeneration.TextGeneration["Service"];
 
 export type FreebuffDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
@@ -211,7 +188,7 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
         enabled,
         snapshot,
         adapter,
-        textGeneration,
+        textGeneration: makeUnsupportedTextGeneration(FREEBUFF_PROVIDER),
       } satisfies ProviderInstance;
     }),
 };
