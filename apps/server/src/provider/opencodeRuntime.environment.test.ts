@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { withOpenCodeProviderConfig } from "@t3tools/shared/openCodeProviderConfig";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -41,6 +42,32 @@ describe("resolveOpenCodeConfigContent", () => {
       }),
     ).toBe('{"source":"process"}');
     expect(resolveOpenCodeConfigContent(undefined, {})).toBe("{}");
+  });
+});
+
+describe("resolveOpenCodeConfigContent", () => {
+  it("carries provider config merged into the document the server is spawned with", () => {
+    // The driver hands OpenCode its config through the environment; these two
+    // halves must agree on the variable or a configured provider is ignored.
+    const environment = withOpenCodeProviderConfig({
+      environment: { OPENCODE_CONFIG_CONTENT: '{"model":"anthropic/claude-sonnet-5"}' },
+      entries: [
+        {
+          providerId: "local",
+          env: [],
+          apiKey: "sk-local",
+          apiKeyRedacted: false,
+          models: [{ modelId: "vendor/large" }],
+        },
+      ],
+    });
+    expect(resolveOpenCodeConfigContent(environment, {})).toBe(environment.OPENCODE_CONFIG_CONTENT);
+    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toEqual({
+      model: "anthropic/claude-sonnet-5",
+      provider: {
+        local: { options: { apiKey: "sk-local" }, models: { "vendor/large": {} } },
+      },
+    });
   });
 });
 

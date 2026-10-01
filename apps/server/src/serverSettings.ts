@@ -59,6 +59,13 @@ import {
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import {
+  listOpenCodeProviderApiKeys,
+  materializeOpenCodeProviderApiKeys,
+  openCodeProviderApiKeySecretName,
+  planOpenCodeProviderApiKeyPersistence,
+  redactOpenCodeProviderApiKeys,
+} from "./openCodeProviderSecrets.ts";
+import {
   cloudRuntimeCredentialName,
   sameCloudCredentialScope,
   staleCloudCredentialIds,
@@ -148,6 +155,16 @@ function providerEnvironmentSecretName(input: {
   return `provider-env-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
 }
 
+const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
+
+/**
+ * OpenCode provider API keys live in the same opaque instance config blob as
+ * the rest of that driver's settings, so they move between the file and the
+ * secret store in lockstep with the provider map.
+ */
+const isOpenCodeProviderInstance = (instance: ProviderInstanceConfig): boolean =>
+  instance.driver === OPENCODE_DRIVER_KIND;
+
 /**
  * On disk a hub key or Bitbucket token is replaced by this marker and the
  * real value lives in the secret store, mirroring provider environment
@@ -183,15 +200,21 @@ function redactProviderEnvironmentVariable(
 
 export function redactServerSettingsForClient(settings: ServerSettings): ServerSettings {
   const providerInstances = Object.fromEntries(
-    Object.entries(settings.providerInstances).map(([instanceId, instance]) => [
-      instanceId,
-      instance.environment
-        ? {
-            ...instance,
-            environment: instance.environment.map(redactProviderEnvironmentVariable),
-          }
-        : instance,
-    ]),
+    Object.entries(settings.providerInstances).map(([instanceId, instance]) => {
+      // OpenCode keeps its provider keys inside the opaque config blob, so
+      // redact there as well as in the environment an instance may also have.
+      const withRedactedProviders = isOpenCodeProviderInstance(instance)
+        ? { ...instance, config: redactOpenCodeProviderApiKeys(instance.config) }
+        : instance;
+      if (!withRedactedProviders.environment) return [instanceId, withRedactedProviders];
+      return [
+        instanceId,
+        {
+          ...withRedactedProviders,
+          environment: withRedactedProviders.environment.map(redactProviderEnvironmentVariable),
+        },
+      ];
+    }),
   );
   // The hub key is a bearer secret; clients only need to know one is set.
   const usageLimitSources = Object.fromEntries(
@@ -735,36 +758,82 @@ const make = Effect.gen(function* () {
         ...settings.providerInstances,
       };
       for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
-        if (!instance.environment) continue;
-        const environment: ProviderInstanceEnvironmentVariable[] = [];
-        for (const variable of instance.environment) {
-          if (!variable.sensitive || !variable.valueRedacted) {
-            environment.push(variable);
-            continue;
-          }
-          const secret = yield* secretStore
-            .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerSettingsError({
-                    settingsPath,
-                    operation: "read-secret",
-                    providerInstanceId: instanceId,
-                    environmentVariable: variable.name,
-                    cause,
-                  }),
-              ),
+        let nextInstance = instance;
+        if (isOpenCodeProviderInstance(instance)) {
+          const redactedKeys = listOpenCodeProviderApiKeys(instance.config).filter(
+            (entry) => entry.apiKeyRedacted,
+          );
+          if (redactedKeys.length > 0) {
+            const resolved: ReadonlyArray<readonly [string, string]> = yield* Effect.forEach(
+              redactedKeys,
+              (entry) =>
+                secretStore
+                  .get(
+                    openCodeProviderApiKeySecretName({
+                      instanceId,
+                      providerId: entry.providerId,
+                    }),
+                  )
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ServerSettingsError({
+                          settingsPath,
+                          operation: "read-secret",
+                          providerInstanceId: instanceId,
+                          cause,
+                        }),
+                    ),
+                    Effect.map(
+                      (secret) =>
+                        [
+                          entry.providerId,
+                          Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+                        ] as [string, string],
+                    ),
+                  ),
             );
-          environment.push({
-            ...variable,
-            value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
-          });
+            const resolvedByProviderId = new Map(resolved);
+            nextInstance = {
+              ...instance,
+              config: materializeOpenCodeProviderApiKeys(
+                instance.config,
+                (providerId) => resolvedByProviderId.get(providerId) ?? "",
+              ),
+            } satisfies ProviderInstanceConfig;
+          }
         }
-        providerInstances[instanceId] = {
-          ...instance,
-          environment,
-        } satisfies ProviderInstanceConfig;
+        if (nextInstance.environment) {
+          const environment: ProviderInstanceEnvironmentVariable[] = [];
+          for (const variable of nextInstance.environment) {
+            if (!variable.sensitive || !variable.valueRedacted) {
+              environment.push(variable);
+              continue;
+            }
+            const secret = yield* secretStore
+              .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ServerSettingsError({
+                      settingsPath,
+                      operation: "read-secret",
+                      providerInstanceId: instanceId,
+                      environmentVariable: variable.name,
+                      cause,
+                    }),
+                ),
+              );
+            environment.push({
+              ...variable,
+              value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+            });
+          }
+          nextInstance = { ...nextInstance, environment } satisfies ProviderInstanceConfig;
+        }
+        if (nextInstance !== instance) {
+          providerInstances[instanceId] = nextInstance;
+        }
       }
       const usageLimitSources: Record<string, UsageLimitSourceConfig> = {};
       for (const [sourceId, source] of Object.entries(settings.usageLimitSources)) {
@@ -839,9 +908,42 @@ const make = Effect.gen(function* () {
 
       const nextSecretKeys = new Set<string>();
       for (const [instanceId, instance] of Object.entries(next.providerInstances)) {
-        if (!instance.environment) continue;
+        let nextInstance = instance;
+        if (isOpenCodeProviderInstance(instance)) {
+          const plan = planOpenCodeProviderApiKeyPersistence({
+            nextConfig: instance.config,
+            currentConfig: current.providerInstances[ProviderInstanceId.make(instanceId)]?.config,
+          });
+          for (const providerId of plan.retainedProviderIds) {
+            nextSecretKeys.add(openCodeProviderApiKeySecretName({ instanceId, providerId }));
+          }
+          for (const write of plan.writes) {
+            changes.push({
+              kind: "write",
+              secretName: openCodeProviderApiKeySecretName({
+                instanceId,
+                providerId: write.providerId,
+              }),
+              value: textEncoder.encode(write.value),
+              providerInstanceId: instanceId,
+            });
+          }
+          for (const providerId of plan.removedProviderIds) {
+            changes.push({
+              kind: "remove",
+              secretName: openCodeProviderApiKeySecretName({ instanceId, providerId }),
+              operation: "remove-secret",
+              providerInstanceId: instanceId,
+            });
+          }
+          nextInstance = { ...instance, config: plan.config } satisfies ProviderInstanceConfig;
+        }
+        if (!nextInstance.environment) {
+          if (nextInstance !== instance) providerInstances[instanceId] = nextInstance;
+          continue;
+        }
         const environment: ProviderInstanceEnvironmentVariable[] = [];
-        for (const variable of instance.environment) {
+        for (const variable of nextInstance.environment) {
           const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
           if (!variable.sensitive) {
             changes.push({
@@ -894,7 +996,7 @@ const make = Effect.gen(function* () {
           environment.push(redactProviderEnvironmentVariable(variable));
         }
         providerInstances[instanceId] = {
-          ...instance,
+          ...nextInstance,
           environment,
         } satisfies ProviderInstanceConfig;
       }
@@ -910,6 +1012,19 @@ const make = Effect.gen(function* () {
             operation: "remove-stale-secret",
             providerInstanceId: instanceId,
             environmentVariable: variable.name,
+          });
+        }
+        // A provider the user deleted — or deleted along with its instance —
+        // would otherwise leave its stored key behind.
+        if (!isOpenCodeProviderInstance(instance)) continue;
+        for (const { providerId } of listOpenCodeProviderApiKeys(instance.config)) {
+          const secretName = openCodeProviderApiKeySecretName({ instanceId, providerId });
+          if (nextSecretKeys.has(secretName)) continue;
+          changes.push({
+            kind: "remove",
+            secretName,
+            operation: "remove-stale-secret",
+            providerInstanceId: instanceId,
           });
         }
       }

@@ -29,6 +29,7 @@ import * as ServerConfig from "./config.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import * as ServerSettingsModule from "./serverSettings.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
+import { openCodeProviderApiKeySecretName } from "./openCodeProviderSecrets.ts";
 
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
@@ -1047,6 +1048,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         serverUrl: "http://127.0.0.1:4096",
         serverPassword: "secret-password",
         customModels: [],
+        providers: {},
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
@@ -1312,6 +1314,191 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(makeServerSettingsLayer())),
     );
   }
+
+  it.effect("persists OpenCode providers and models, keeping API keys out of settings.json", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const instanceId = ProviderInstanceId.make("opencode");
+
+      const saved = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: {
+              binaryPath: "opencode",
+              providers: {
+                openai: {
+                  apiKey: "sk-openai-secret",
+                  models: [{ modelId: "gpt-next", name: "GPT Next", reasoning: true }],
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // The in-memory copy keeps the real key for the driver to use.
+      assert.deepEqual(
+        (saved.providerInstances[instanceId]?.config as { providers: Record<string, unknown> })
+          .providers.openai,
+        {
+          apiKey: "sk-openai-secret",
+          apiKeyRedacted: true,
+          models: [{ modelId: "gpt-next", name: "GPT Next", reasoning: true }],
+        },
+      );
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(raw, "sk-openai-secret");
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const persisted = JSON.parse(raw);
+      assert.deepEqual(persisted.providerInstances.opencode.config.providers.openai, {
+        apiKey: "",
+        apiKeyRedacted: true,
+        models: [{ modelId: "gpt-next", name: "GPT Next", reasoning: true }],
+      });
+      // Sparse settings: an untouched provider stays out of the file entirely.
+      assert.isUndefined(persisted.providerInstances.opencode.config.customModels);
+
+      // A client that echoes the marker back must not lose the stored key.
+      const roundTripped = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: {
+              binaryPath: "opencode",
+              providers: {
+                openai: {
+                  apiKey: "",
+                  apiKeyRedacted: true,
+                  models: [{ modelId: "gpt-next", name: "GPT Next", reasoning: true }],
+                },
+              },
+            },
+          },
+        },
+      });
+      assert.equal(
+        (
+          roundTripped.providerInstances[instanceId]?.config as {
+            providers: Record<string, { readonly apiKey?: string }>;
+          }
+        ).providers.openai?.apiKey,
+        "sk-openai-secret",
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("removes the stored OpenCode provider key when the provider is deleted", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const instanceId = ProviderInstanceId.make("opencode");
+
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: { providers: { local: { apiKey: "sk-removed" } } },
+          },
+        },
+      });
+      assert.isTrue(
+        Option.isSome(
+          yield* secrets.get(openCodeProviderApiKeySecretName({ instanceId, providerId: "local" })),
+        ),
+      );
+
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: { providers: {} },
+          },
+        },
+      });
+      assert.isTrue(
+        Option.isNone(
+          yield* secrets.get(openCodeProviderApiKeySecretName({ instanceId, providerId: "local" })),
+        ),
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayerWithSecrets())),
+  );
+
+  it.effect("removes the stored OpenCode provider key when the provider map is cleared", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const instanceId = ProviderInstanceId.make("opencode_scratch");
+
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: { providers: { local: { apiKey: "sk-instance-scoped" } } },
+          },
+        },
+      });
+      assert.isTrue(
+        Option.isSome(
+          yield* secrets.get(openCodeProviderApiKeySecretName({ instanceId, providerId: "local" })),
+        ),
+      );
+
+      const afterDelete = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: { driver: ProviderDriverKind.make("opencode"), config: {} },
+        },
+      });
+      // A key belongs to the provider, so clearing the map clears the secret.
+      assert.deepEqual(afterDelete.providerInstances[instanceId]?.config, {});
+      assert.isTrue(
+        Option.isNone(
+          yield* secrets.get(openCodeProviderApiKeySecretName({ instanceId, providerId: "local" })),
+        ),
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayerWithSecrets())),
+  );
+
+  it.effect("redacts OpenCode provider API keys for clients but restores them on read", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("opencode");
+
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: { providers: { local: { apiKey: "sk-client-secret" } } },
+          },
+        },
+      });
+
+      const forClient = ServerSettingsModule.redactServerSettingsForClient(
+        yield* serverSettings.getSettings,
+      );
+      assert.deepEqual(
+        (
+          forClient.providerInstances[instanceId]?.config as {
+            providers: Record<string, unknown>;
+          }
+        ).providers.local,
+        { apiKey: "", apiKeyRedacted: true },
+      );
+
+      const reread = yield* serverSettings.getSettings;
+      assert.equal(
+        (
+          reread.providerInstances[instanceId]?.config as {
+            providers: Record<string, { readonly apiKey?: string }>;
+          }
+        ).providers.local?.apiKey,
+        "sk-client-secret",
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
 
   it.effect("stores sensitive provider instance environment values outside settings.json", () =>
     Effect.gen(function* () {

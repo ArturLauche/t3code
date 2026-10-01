@@ -13,6 +13,10 @@
  * @module provider/Drivers/OpenCodeDriver
  */
 import { OpenCodeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  openCodeProviderEntries,
+  withOpenCodeProviderConfig,
+} from "@t3tools/shared/openCodeProviderConfig";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -122,6 +126,15 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
+      // Providers the user added in Settings become OpenCode's own config
+      // document. OpenCode resolves them, loads their `@ai-sdk/*` packages and
+      // reports which models connected; T3 Code only supplies the config and
+      // reads the inventory back. Merged over any `OPENCODE_CONFIG_CONTENT`
+      // the instance already carries, never replacing it.
+      const openCodeEnvironment = withOpenCodeProviderConfig({
+        environment: processEnv,
+        entries: openCodeProviderEntries(effectiveConfig.providers),
+      }) as NodeJS.ProcessEnv;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -135,7 +148,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
-        environment: processEnv,
+        environment: openCodeEnvironment,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const serverOwner = yield* OpenCodeServerOwner.make({
@@ -144,7 +157,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         ...(effectiveConfig.serverPassword
           ? { serverPassword: effectiveConfig.serverPassword }
           : {}),
-        environment: processEnv,
+        environment: openCodeEnvironment,
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
@@ -152,7 +165,11 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
 
       const checkProvider = Effect.all(
         {
-          provider: checkOpenCodeProviderStatus(effectiveConfig, serverConfig.cwd, processEnv),
+          provider: checkOpenCodeProviderStatus(
+            effectiveConfig,
+            serverConfig.cwd,
+            openCodeEnvironment,
+          ),
           usageLimits: readOpenCodeGoUsageLimits({
             enabled: effectiveConfig.enabled,
             serverUrl: effectiveConfig.serverUrl,
@@ -199,7 +216,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                   ...(effectiveConfig.serverPassword
                     ? { serverPassword: effectiveConfig.serverPassword }
                     : {}),
-                  environment: processEnv,
+                  environment: openCodeEnvironment,
                 });
                 const client = openCodeRuntime.createOpenCodeSdkClient({
                   baseUrl: server.url,

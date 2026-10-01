@@ -20,6 +20,7 @@ export * from "./providerUsageLimits.ts";
 export * from "./usageLimitSourceId.ts";
 export * from "./cloudRuntime.ts";
 export * from "./model.ts";
+export * from "./openCodeProvider.ts";
 export * from "./keybindings.ts";
 export * from "./server.ts";
 export * from "./settings.ts";

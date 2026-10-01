@@ -32,6 +32,33 @@ using the same workspace. It is broader than the current thread, especially on a
 shared external server. Use **Allow once** for a single request. Denying an action
 does not stop the whole turn.
 
+## Add providers and models
+
+**Settings > Providers** has a **Providers** section for each OpenCode instance.
+It lists the providers OpenCode reported as _Available through OpenCode_, and
+anything you add under _Configured in T3 Code_.
+
+Use it to point OpenCode at a relay or self-hosted endpoint, give a provider a
+package to load, and declare models OpenCode does not know yet. Entries become
+OpenCode's own configuration, so OpenCode resolves them; a model appears in the
+model picker once OpenCode reports it as connected. Until then the model row
+reads _not connected yet_, and the provider card names any configured model that
+did not connect — usually a wrong key or base URL.
+
+A model id alone is enough when the provider already serves it. Set the display
+name and the reasoning, image, or tool switches only when you want to override
+what OpenCode infers. OpenCode needs a context window and a maximum output size
+together, so fill in both or leave both blank.
+
+API keys are stored separately from settings and are never sent back to the app.
+**Environment** on the same card is the place for values OpenCode should read
+from the environment instead, including `OPENCODE_CONFIG_CONTENT` if you keep a
+hand-written OpenCode configuration: T3 Code merges its own providers into it
+rather than replacing it.
+
+These entries only apply to an OpenCode server T3 Code starts. A configured
+**Server URL** keeps its own configuration, so change it there.
+
 ## Refresh models, commands, and skills
 
 After changing an OpenCode login or configuration, use **Refresh provider status**

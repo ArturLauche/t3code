@@ -33,6 +33,7 @@ import {
   readCustomModelEntries,
   toCustomModelSetting,
 } from "@t3tools/shared/model";
+import type { OpenCodeProviderSettingsMap } from "@t3tools/contracts";
 import { cn } from "../../lib/utils";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
@@ -47,10 +48,17 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { DriverOption } from "./providerDriverMeta";
 import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
+import { OpenCodeProvidersSection } from "./OpenCodeProvidersSection";
+import {
+  readInstanceOpenCodeProviders,
+  withInstanceOpenCodeProviders,
+} from "./openCodeProviders.logic";
 import { ProviderInstanceIcon, providerInstanceInitials } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -129,6 +137,13 @@ function providerEnvironmentsEqual(
 function readConfigCustomModels(config: unknown): ReadonlyArray<CustomModelDefinition> {
   if (config === null || typeof config !== "object") return [];
   return readCustomModelEntries((config as Record<string, unknown>).customModels);
+}
+
+/** Whether this OpenCode instance talks to a server T3 Code does not start. */
+function serverUrlOf(config: unknown): string {
+  if (config === null || typeof config !== "object") return "";
+  const serverUrl = (config as Record<string, unknown>).serverUrl;
+  return typeof serverUrl === "string" ? serverUrl.trim() : "";
 }
 
 /**
@@ -390,6 +405,7 @@ interface ProviderInstanceCardProps {
    */
   readonly headerAction?: ReactNode | undefined;
   readonly setup?: ReactNode;
+  readonly runtime?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
@@ -434,6 +450,7 @@ export function ProviderInstanceCard({
   onDelete,
   headerAction,
   setup,
+  runtime,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -507,6 +524,7 @@ export function ProviderInstanceCard({
     : null;
   const customModels =
     instance.driver === "antigravity" ? [] : readConfigCustomModels(instance.config);
+  const openCodeProviders = readInstanceOpenCodeProviders(instance.config);
   // Server-returned models may lag behind settings writes. Treat probe
   // models as the source for built-ins only; custom rows come directly
   // from the current instance config so add/remove reflects immediately.
@@ -545,6 +563,13 @@ export function ProviderInstanceCard({
         ? ({ ...rest, config: nextConfig } as ProviderInstanceConfig)
         : (rest as ProviderInstanceConfig),
     );
+  };
+
+  const updateOpenCodeProviders = (providers: OpenCodeProviderSettingsMap) => {
+    onUpdate({
+      ...instance,
+      config: withInstanceOpenCodeProviders(instance.config, providers),
+    } as ProviderInstanceConfig);
   };
 
   const updateCustomModels = (next: ReadonlyArray<CustomModelDefinition>) => {
@@ -678,11 +703,6 @@ export function ProviderInstanceCard({
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-              {String(instanceId) !== String(instance.driver) ? (
-                <code className="min-w-0 truncate rounded bg-muted/60 px-1 py-0.5 text-3xs text-muted-foreground">
-                  {instanceId}
-                </code>
-              ) : null}
               {versionLabel ? (
                 <code className="max-w-24 shrink-0 truncate text-xs text-muted-foreground">
                   {versionLabel}
@@ -884,6 +904,26 @@ export function ProviderInstanceCard({
     </div>
   );
 
+  const runtimeFields = driverOption ? (
+    <ProviderSettingsForm
+      definition={driverOption}
+      value={instance.config}
+      idPrefix={`provider-instance-${instanceId}`}
+      variant="settings"
+      onChange={updateConfig}
+    />
+  ) : (
+    <SettingsRow
+      title="Driver"
+      description={
+        <span>
+          This instance uses <code className="text-foreground">{String(instance.driver)}</code>,
+          which is not available in this build. Its configuration is preserved.
+        </span>
+      }
+    />
+  );
+
   return (
     <>
       <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
@@ -931,33 +971,31 @@ export function ProviderInstanceCard({
 
       {setup ? <SettingsSection title="Setup">{setup}</SettingsSection> : null}
 
-      <SettingsSection
-        title="Runtime"
-        inert={readOnly}
-        aria-disabled={readOnly || undefined}
-        className={readOnly ? "opacity-50 select-none" : undefined}
-      >
-        {driverOption ? (
-          <ProviderSettingsForm
-            definition={driverOption}
-            value={instance.config}
-            idPrefix={`provider-instance-${instanceId}`}
-            variant="settings"
-            onChange={updateConfig}
-          />
-        ) : (
-          <SettingsRow
-            title="Driver"
-            description={
-              <span>
-                This instance uses{" "}
-                <code className="text-foreground">{String(instance.driver)}</code>, which is not
-                available in this build. Its configuration is preserved.
-              </span>
-            }
-          />
-        )}
-      </SettingsSection>
+      {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed" ? (
+        <div
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          <FoldedSettingsSection
+            key={instanceId}
+            id={`provider-instance-${instanceId}-runtime`}
+            title="Runtime"
+            headerPlacement="outside"
+          >
+            {runtime ?? runtimeFields}
+          </FoldedSettingsSection>
+        </div>
+      ) : (
+        <SettingsSection
+          title="Runtime"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          {runtimeFields}
+        </SettingsSection>
+      )}
 
       {instance.executionTarget &&
       (driverOption?.supportsCloudExecution !== true || staleCloudTarget) ? (
@@ -1037,6 +1075,22 @@ export function ProviderInstanceCard({
           onChange={updateEnvironment}
         />
       </SettingsSection>
+
+      {instance.driver === "opencode" ? (
+        <SettingsSection
+          title="Providers"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          <OpenCodeProvidersSection
+            models={liveProvider?.models ?? []}
+            providers={openCodeProviders}
+            usesExternalServer={serverUrlOf(instance.config).length > 0}
+            onChange={updateOpenCodeProviders}
+          />
+        </SettingsSection>
+      ) : null}
 
       {driverOption !== undefined ? (
         <SettingsSection
