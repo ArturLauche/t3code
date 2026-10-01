@@ -473,6 +473,78 @@
         "licenseId": "MIT",
         "copyrights": ["Copyright (c) 2025 opencode"]
       }
+    },
+    {
+      "name": "https-proxy-agent",
+      "sourceUrl": "https://github.com/TooTallNate/node-https-proxy-agent",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "preamble": [
+          "The published tarball ships no license or notice file. The MIT text below is the license the project declares in package.json; the repository carries the copyright line."
+        ]
+      }
+    },
+    {
+      "name": "agent-base",
+      "sourceUrl": "https://github.com/TooTallNate/node-agent-base",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "preamble": [
+          "The published tarball ships no license or notice file. The MIT text below is the license the project declares in package.json; the repository carries the copyright line."
+        ]
+      }
+    },
+    {
+      "name": "engine.io-parser",
+      "sourceUrl": "https://github.com/socketio/socket.io/tree/main/packages/engine.io-parser",
+      "license": "MIT",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2014-present Guillermo Rauch and Socket.IO contributors"],
+        "preamble": [
+          "Taken from the LICENSE file in the package root. The build/esm and build/cjs subdirectory manifests only carry a module type, so the collector resolves the package through them and never sees the root manifest."
+        ]
+      }
+    },
+    {
+      "name": "@xterm/headless",
+      "sourceUrl": "https://github.com/xtermjs/xterm.js",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": [
+          "Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)",
+          "Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com)",
+          "Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)"
+        ]
+      }
+    },
+    {
+      "name": "@bufbuild/protobuf",
+      "sourceUrl": "https://github.com/bufbuild/protobuf-es/tree/main/packages/protobuf",
+      "generatedNotices": [{ "licenseId": "Apache-2.0" }, { "licenseId": "BSD-3-Clause" }]
+    },
+    {
+      "name": "@connectrpc/connect",
+      "sourceUrl": "https://github.com/connectrpc/connect-es/tree/main/packages/connect",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "@connectrpc/connect-web",
+      "sourceUrl": "https://github.com/connectrpc/connect-es/tree/main/packages/connect-web",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "novita-sandbox",
+      "sourceUrl": "https://novita.ai/sandbox",
+      "license": "MIT",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2025 Novita AI"]
+      }
     }
   ]
 }

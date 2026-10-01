@@ -195,7 +195,7 @@ export function toOpenCodeProviderSettings(entry: OpenCodeProviderEntry): OpenCo
  * map keys, because OpenCode reads `models[modelId]` and only consults `id`
  * when the upstream id differs from the key.
  */
-export function toOpenCodeProviderConfig(entry: OpenCodeProviderEntry): Record<string, unknown> {
+function toOpenCodeProviderConfig(entry: OpenCodeProviderEntry): Record<string, unknown> {
   const config: Record<string, unknown> = {};
   if (entry.name?.trim()) config.name = entry.name.trim();
   if (entry.npm?.trim()) config.npm = entry.npm.trim();
@@ -361,7 +361,7 @@ export function validateOpenCodeModelId(value: string): OpenCodeValidationIssue 
   return null;
 }
 
-export function validateOpenCodeNpmPackage(value: string): OpenCodeValidationIssue | null {
+function validateOpenCodeNpmPackage(value: string): OpenCodeValidationIssue | null {
   const npm = value.trim();
   if (npm.length === 0) return null;
   if (npm.length > OPEN_CODE_MAX_NPM_LENGTH) {
