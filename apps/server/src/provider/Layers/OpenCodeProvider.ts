@@ -313,7 +313,7 @@ function trimOptional(value: string | null | undefined): string | undefined {
  * missing slugs points at the usual causes — a wrong key, a base URL that does
  * not speak the provider's API, or a model id the upstream does not serve.
  */
-export function missingOpenCodeConfiguredModels(input: {
+function missingOpenCodeConfiguredModels(input: {
   readonly entries: ReadonlyArray<OpenCodeProviderEntry>;
   readonly reportedSlugs: ReadonlySet<string>;
 }): ReadonlyArray<string> {
