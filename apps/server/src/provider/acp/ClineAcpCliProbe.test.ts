@@ -19,6 +19,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 import { ServerConfig } from "../../config.ts";
 import {
@@ -29,7 +30,6 @@ import {
   findClineModelConfigOption,
   makeClineAcpRuntime,
 } from "./ClineAcpSupport.ts";
-import { ProviderAdapterRequestError } from "../Errors.ts";
 
 const decodeClineSettings = Schema.decodeSync(ClineSettings);
 const enabled = process.env.T3_CLINE_ACP_PROBE === "1";
@@ -100,10 +100,10 @@ describe.runIf(enabled)("Cline ACP CLI probe", () => {
             runtime: acp,
             requestedModelId: requested,
             mapError: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: "cline" as never,
+              new EffectAcpErrors.AcpRequestError({
+                code: -32000,
                 method: "session/set_config_option",
-                detail: cause.message,
+                errorMessage: cause.message,
               }),
           });
         }),

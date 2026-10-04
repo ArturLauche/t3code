@@ -65,8 +65,10 @@ export interface ServerProviderPresentation {
   readonly displayName: string;
   readonly badgeLabel?: string;
   readonly showInteractionModeToggle?: boolean;
+  /** Access modes the agent can actually enforce; absent means all of them. */
   readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   readonly supportsImageAttachments?: boolean;
+  readonly supportsFileAttachments?: boolean;
   readonly reportsContextWindow?: boolean;
   readonly requiresNewThreadForModelChange?: boolean;
   readonly supportsConversationRollback?: boolean;
@@ -227,11 +229,16 @@ export function buildServerProvider(input: {
     ...(typeof input.presentation.showInteractionModeToggle === "boolean"
       ? { showInteractionModeToggle: input.presentation.showInteractionModeToggle }
       : {}),
-    ...(input.presentation.supportedRuntimeModes
-      ? { supportedRuntimeModes: [...input.presentation.supportedRuntimeModes] }
-      : {}),
+    ...(input.presentation.supportedRuntimeModes === undefined
+      ? {}
+      : { supportedRuntimeModes: [...input.presentation.supportedRuntimeModes] }),
     ...(typeof input.presentation.supportsImageAttachments === "boolean"
       ? { supportsImageAttachments: input.presentation.supportsImageAttachments }
+      : {}),
+    // Files are a separate question from images: a provider can take a file and
+    // still drop an image, so the two flags are never inferred from each other.
+    ...(typeof input.presentation.supportsFileAttachments === "boolean"
+      ? { supportsFileAttachments: input.presentation.supportsFileAttachments }
       : {}),
     ...(typeof input.presentation.supportsTextGeneration === "boolean"
       ? { supportsTextGeneration: input.presentation.supportsTextGeneration }

@@ -6,12 +6,13 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { makeFreebuffAdapterV2 } from "../../orchestration-v2/Adapters/FreebuffAdapterV2.ts";
 import { makeUnsupportedTextGeneration } from "../../textGeneration/unsupportedTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeFreebuffAdapter } from "../Layers/FreebuffAdapter.ts";
 import {
   buildInitialFreebuffProviderSnapshot,
   checkFreebuffProviderStatus,
@@ -56,6 +57,7 @@ export type FreebuffDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
+  | IdAllocator.IdAllocatorV2
   | Path.Path
   | ServerConfig
   | ServerSettingsService;
@@ -76,6 +78,7 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const effectiveConfig = {
         ...config,
         enabled,
@@ -135,14 +138,15 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
           );
         return hasCredentialsFile || Boolean(processEnvironment.CODEBUFF_API_KEY?.trim());
       });
-      // The server provides the live PTY service at the provider-instance
-      // hydration boundary; Freebuff intentionally has no cloud PTY transport.
-      const adapter = yield* makeFreebuffAdapter({
+      // The server provides the live PTY service at the runtime boundary;
+      // Freebuff intentionally has no cloud PTY transport.
+      const orchestrationAdapter = makeFreebuffAdapterV2({
+        instanceId,
         settings: effectiveConfig,
         configDir,
         environment: processEnvironment,
-        instanceId,
-        defaultCwd: serverConfig.cwd,
+        idAllocator,
+        serverConfig,
       });
       const checkProvider = Effect.gen(function* () {
         const isAuthenticated = yield* readIsAuthenticated;
@@ -187,7 +191,7 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         textGeneration: makeUnsupportedTextGeneration(FREEBUFF_PROVIDER),
       } satisfies ProviderInstance;
     }),

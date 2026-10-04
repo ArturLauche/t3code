@@ -24,11 +24,9 @@ import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import type * as EffectAcpErrors from "effect-acp/errors";
 import * as Crypto from "effect/Crypto";
 
 import {
@@ -52,10 +50,6 @@ import { expandHomePath } from "../../pathExpansion.ts";
  */
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 const ACP_DISCOVERY_TIMEOUT_MS = 20_000;
-/** How long a wedged probe child gets to exit on SIGTERM before SIGKILL. */
-const PROBE_FORCE_KILL_AFTER = "1 second" as const;
-/** Ceiling on the kill itself, so teardown is bounded even against a wedged peer. */
-const PROBE_TERMINATE_TIMEOUT_MS = 2_000;
 const CLINE_DEFAULT_COMMAND = "cline";
 
 /**
@@ -146,7 +140,6 @@ type AcpSessionSetupResponse = Parameters<typeof clineModelsFromSessionSetup>[0]
 
 type StartOutcome =
   | { readonly kind: "ok"; readonly sessionSetupResult: AcpSessionSetupResponse }
-  | { readonly kind: "error"; readonly cause: Cause.Cause<EffectAcpErrors.AcpError> }
   | { readonly kind: "timeout" };
 
 export type ClineAcpDiscovery =
@@ -188,32 +181,21 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
     // releases the fiber. A detached fiber would outlive the probe, so a kill
     // that fails leaks a fiber and its runtime for the life of the server, once
     // per status refresh.
-    const startFiber = yield* acp.start().pipe(Effect.forkScoped);
     // Race rather than time out: `Effect.timeoutOption` interrupts the awaited
     // fiber, and interrupting a startup that is parked on an unanswered
     // JSON-RPC request tears the runtime down against a peer that will never
-    // answer. Racing leaves `start` alone so this scope can kill the child.
-    const startOutcome = yield* Effect.raceFirst(
-      Fiber.await(startFiber).pipe(
-        Effect.map((exit): StartOutcome =>
-          Exit.isSuccess(exit)
-            ? { kind: "ok", sessionSetupResult: exit.value.sessionSetupResult }
-            : { kind: "error", cause: exit.cause },
-        ),
-      ),
-      Effect.sleep(timeoutMs).pipe(Effect.as<StartOutcome>({ kind: "timeout" })),
+    // answer. Racing leaves `start` alone, so the scope close below still owns
+    // the child and its process group.
+    const startOutcome = yield* acp.start().pipe(
+      Effect.map((started): StartOutcome => ({
+        kind: "ok",
+        sessionSetupResult: started.sessionSetupResult,
+      })),
+      Effect.race(Effect.sleep(timeoutMs).pipe(Effect.as<StartOutcome>({ kind: "timeout" }))),
     );
 
     if (startOutcome.kind === "timeout") {
-      // Bound the kill too: a peer that never answers must not turn teardown
-      // into an unbounded wait.
-      yield* acp
-        .terminate(PROBE_FORCE_KILL_AFTER)
-        .pipe(Effect.timeoutOption(PROBE_TERMINATE_TIMEOUT_MS), Effect.ignore);
       return { kind: "failed", errorTag: "Timeout" } satisfies ClineAcpDiscovery;
-    }
-    if (startOutcome.kind === "error") {
-      return yield* Effect.failCause(startOutcome.cause);
     }
     return {
       kind: "ok",
@@ -226,6 +208,8 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
         ? Effect.succeed({ kind: "unauthenticated" })
         : Effect.succeed({ kind: "failed", errorTag: causeErrorTag(cause) });
     }),
+    // Closing the scope kills the probe's own child process group, so a CLI
+    // that never answers `initialize` cannot outlive the probe.
     Effect.scoped,
   );
 });

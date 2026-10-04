@@ -37,11 +37,10 @@ import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as AcpCompat from "effect-acp/compat";
 
 import { findSessionConfigOption } from "./AcpRuntimeModel.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
-import type { ProviderAdapterError } from "../Errors.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 
 const CLINE_BINARY = "cline";
@@ -126,6 +125,10 @@ export const makeClineAcpRuntime = Effect.fn("makeClineAcpRuntime")(function* (
       // Cline implements `session/load` and returns its model catalog in the
       // authoritative response. `session/resume` is `-32601` on this build.
       resumeMethod: "load",
+      // Even when session setup answers "call authenticate", T3 must not:
+      // `authenticate` is an interactive flow on the server host, not a
+      // headless credential grant. See the module comment.
+      authenticateOnAuthRequired: false,
       // Cline never calls `fs/*` or `terminal/*`; it does all file and shell
       // work in-process, so advertising client filesystem access would only
       // invite traffic T3 cannot meaningfully gate.
@@ -147,14 +150,11 @@ export const makeClineAcpRuntime = Effect.fn("makeClineAcpRuntime")(function* (
 /* -------------------------------------------------------------------------- */
 
 type ClineSessionSetupResult =
-  | EffectAcpSchema.LoadSessionResponse
-  | EffectAcpSchema.NewSessionResponse
-  | EffectAcpSchema.ResumeSessionResponse;
+  | AcpCompat.LoadSessionResponse
+  | AcpCompat.NewSessionResponse
+  | AcpCompat.ResumeSessionResponse;
 
-type ClineModelSelectOption = Extract<
-  EffectAcpSchema.SessionConfigOption,
-  { readonly type: "select" }
->;
+type ClineModelSelectOption = Extract<AcpCompat.SessionConfigOption, { readonly type: "select" }>;
 
 /**
  * Cline advertises the model picker twice: as the unstable `models` object and
@@ -180,7 +180,7 @@ function clineModelSelectValues(
  * the literal `model` id and never fall back to the provider picker.
  */
 export function findClineModelConfigOption(
-  configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null | undefined,
+  configOptions: ReadonlyArray<AcpCompat.SessionConfigOption> | null | undefined,
 ): ClineModelSelectOption | undefined {
   const byId = findSessionConfigOption(configOptions, "model");
   if (byId?.type === "select") {
@@ -278,8 +278,8 @@ export const applyClineAcpModelSelection = Effect.fn("applyClineAcpModelSelectio
       "getConfigOptions" | "setConfigOption"
     >;
     readonly requestedModelId: string | null | undefined;
-    readonly mapError: (cause: EffectAcpErrors.AcpError) => ProviderAdapterError;
-  }): Effect.fn.Return<void, ProviderAdapterError | ClineModelSelectionError> {
+    readonly mapError: (cause: EffectAcpErrors.AcpError) => Error;
+  }): Effect.fn.Return<void, Error | ClineModelSelectionError> {
     const requested = input.requestedModelId?.trim();
     if (!requested) {
       return;
@@ -499,8 +499,8 @@ export function classifyClineAuthFailure(
  * event has to say what the CLI will actually do.
  */
 export function clineInitializeResultForSnapshot(
-  initializeResult: EffectAcpSchema.InitializeResponse,
-): EffectAcpSchema.InitializeResponse {
+  initializeResult: AcpCompat.InitializeResponse,
+): AcpCompat.InitializeResponse {
   return {
     ...initializeResult,
     agentCapabilities: {

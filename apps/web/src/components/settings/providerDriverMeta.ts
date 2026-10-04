@@ -1,4 +1,5 @@
 import {
+  AcpRegistrySettings,
   AntigravitySettings,
   ClineSettings,
   ClaudeSettings,
@@ -7,20 +8,10 @@ import {
   FreebuffSettings,
   GrokSettings,
   OpenCodeSettings,
+  PiSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
-import {
-  AntigravityIcon,
-  ClaudeAI,
-  ClineIcon,
-  CursorIcon,
-  FreebuffIcon,
-  GrokIcon,
-  type Icon,
-  OpenAI,
-  OpenCodeIcon,
-} from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -35,8 +26,10 @@ type ProviderSettingsSchema = {
 export interface ProviderClientDefinition {
   readonly value: ProviderDriverKind;
   readonly label: string;
-  readonly icon: Icon;
   readonly settingsSchema: ProviderSettingsSchema;
+  readonly environmentFields?: readonly ProviderEnvironmentFieldDefinition[];
+  /** Whether this driver has a built-in default instance backed by legacy settings. */
+  readonly hasDefaultInstance?: boolean;
   /**
    * Optional short label rendered as a `variant="warning"` badge next to
    * the instance title. Used to flag drivers that still ship under an
@@ -49,33 +42,44 @@ export interface ProviderClientDefinition {
   readonly supportsCloudExecution?: boolean;
 }
 
+export interface ProviderEnvironmentFieldDefinition {
+  readonly name: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly placeholder?: string;
+  readonly sensitive?: boolean;
+}
+
 const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",
-    icon: OpenAI,
     settingsSchema: CodexSettings,
     supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("claudeAgent"),
     label: "Claude",
-    icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
     supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("cursor"),
     label: "Cursor",
-    icon: CursorIcon,
-    badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
-    supportsCloudExecution: true,
+    environmentFields: [
+      {
+        name: "CURSOR_API_KEY",
+        label: "Cursor API key",
+        description: "Optional. Overrides browser sign-in for this provider.",
+        placeholder: "Paste API key",
+        sensitive: true,
+      },
+    ],
   },
   {
     value: ProviderDriverKind.make("cline"),
     label: "Cline",
-    icon: ClineIcon,
     badgeLabel: "Early Access",
     settingsSchema: ClineSettings,
     supportsCloudExecution: false,
@@ -83,7 +87,6 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("freebuff"),
     label: "Freebuff",
-    icon: FreebuffIcon,
     badgeLabel: "Experimental",
     settingsSchema: FreebuffSettings,
     supportsCloudExecution: false,
@@ -91,24 +94,31 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("grok"),
     label: "Grok",
-    icon: GrokIcon,
-    badgeLabel: "Early Access",
     settingsSchema: GrokSettings,
     supportsCloudExecution: true,
   },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
-    icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
     supportsCloudExecution: false,
   },
   {
     value: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
-    icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
     supportsCloudExecution: false,
+  },
+  {
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    settingsSchema: PiSettings,
+  },
+  {
+    value: ProviderDriverKind.make("acpRegistry"),
+    label: "ACP Registry",
+    settingsSchema: AcpRegistrySettings,
+    hasDefaultInstance: false,
   },
 ];
 

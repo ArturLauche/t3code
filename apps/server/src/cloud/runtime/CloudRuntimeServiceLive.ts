@@ -25,6 +25,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
@@ -155,8 +156,26 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
   const environmentIdentity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const environmentId = yield* environmentIdentity.getEnvironmentId;
   const makeVendor = options?.makeVendor ?? makeCloudVendorAdapter;
+  // Credential and sandbox writes have to see one settings snapshot, so they
+  // run inside the settings service's write pause rather than a separate lock.
+  // A settings failure inside one is this service's own failure: the caller
+  // asked for a cloud runtime change and none can be confirmed.
   const withSettingsWriteLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    serverSettings.withWriteLock ? serverSettings.withWriteLock(effect) : effect;
+    serverSettings
+      .withSettingsSnapshot(() => effect)
+      .pipe(
+        Effect.mapError((cause) =>
+          isCloudRuntimeError(cause)
+            ? cause
+            : new CloudRuntimeError({
+                operation: "settings",
+                reason: "operation_failed",
+                message: "The cloud runtime settings could not be read or written.",
+              }),
+        ),
+      );
+
+  const isCloudRuntimeError = Schema.is(CloudRuntimeError);
 
   const getSettings = (runtimeId?: CloudRuntimeId) =>
     serverSettings.getSettings.pipe(

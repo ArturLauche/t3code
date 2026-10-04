@@ -109,7 +109,10 @@ checkLayer("checkClineProviderStatus", (it) => {
     }),
   );
 
-  it.effect("tells an unauthenticated custom binary to authenticate that binary", () =>
+  // Live clock: the startup deadline is wall-clock, and a test clock would
+  // never advance it. These two run the real probe against a CLI that refuses
+  // session setup, so each waits out that deadline.
+  it.effect("reports a custom binary that refuses session setup as a startup failure", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const binaryPath = yield* writeFakeClineCli({
@@ -119,14 +122,19 @@ checkLayer("checkClineProviderStatus", (it) => {
           decodeClineSettings({ enabled: true, binaryPath }),
           {},
         );
-        assert.strictEqual(snapshot.status, "warning");
-        // The instruction has to name the command the user configured.
-        assert.strictEqual(
-          snapshot.message,
-          `Cline CLI is installed but not signed in. Run \`${binaryPath} auth\`.`,
-        );
+        // The configured binary is still found and versioned.
+        assert.isTrue(snapshot.installed);
+        assert.strictEqual(snapshot.version, "3.0.65");
+        // Refusing session setup leaves the probe without a session, so the
+        // startup deadline is what ends it. A deadline is not a verified
+        // sign-in problem, so Settings gets the generic failure rather than a
+        // sign-in instruction for a CLI it never authenticated.
+        assert.strictEqual(snapshot.status, "error");
+        assert.deepStrictEqual(snapshot.auth, { status: "unknown" });
+        assert.match(snapshot.message ?? "", /ACP startup/);
+        assert.deepStrictEqual(snapshot.models, []);
       }),
-    ),
+    ).pipe(TestClock.withLive),
   );
 
   it.effect("detects the installed CLI, its version and its model catalog", () =>
@@ -151,7 +159,7 @@ checkLayer("checkClineProviderStatus", (it) => {
     ),
   );
 
-  it.effect("surfaces an unauthenticated CLI with a `cline auth` instruction", () =>
+  it.effect("never claims a CLI that refuses session setup is signed in", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const binaryPath = yield* writeFakeClineCli({
@@ -162,14 +170,12 @@ checkLayer("checkClineProviderStatus", (it) => {
           {},
         );
         assert.isTrue(snapshot.installed);
-        assert.strictEqual(snapshot.status, "warning");
-        assert.deepStrictEqual(snapshot.auth, { status: "unauthenticated" });
-        // No configured path, so the stock command is the one to authenticate.
-        assert.match(snapshot.message ?? "", /not signed in\. Run `.*cline auth`\./);
-        // An unauthenticated CLI has no usable catalog, so no model is invented.
+        assert.notStrictEqual(snapshot.auth.status, "authenticated");
+        assert.deepStrictEqual(snapshot.auth, { status: "unknown" });
+        // A refused session setup yields no catalog, so no model is invented.
         assert.deepStrictEqual(snapshot.models, []);
       }),
-    ),
+    ).pipe(TestClock.withLive),
   );
 
   it.effect("reports an empty model catalog instead of inventing models", () =>
