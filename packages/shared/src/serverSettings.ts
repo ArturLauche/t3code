@@ -2,6 +2,7 @@ import {
   isProviderDriverKind,
   isProviderAvailable,
   resolveProviderInstanceEnabled,
+  isProviderTextGenerationCapable,
   type ModelSelection,
   type ProjectId,
   type ProjectScopedServerSettingKey,
@@ -96,7 +97,9 @@ export function resolveSourceControlWriterModelSelection(
   }
 
   const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
-  return provider?.enabled === true && isProviderAvailable(provider)
+  return provider?.enabled === true &&
+    isProviderAvailable(provider) &&
+    isProviderTextGenerationCapable(provider)
     ? selection
     : settings.textGenerationModelSelection;
 }
@@ -317,6 +320,7 @@ export function applyServerSettingsPatch(
     // Merged per entry below; its `null` removals must not reach deepMerge.
     usageLimitSources: usageLimitSourcesPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
+    usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
     providerInstances: providerInstancesPatch,
@@ -443,6 +447,14 @@ export function applyServerSettingsPatch(
           usagePriceOverrides: mergeSettingsEntries(
             current.usagePriceOverrides,
             usagePriceOverridesPatch,
+          ),
+        }
+      : {}),
+    ...(usageModelAliasesPatch !== undefined
+      ? {
+          usageModelAliases: mergeSettingsEntries(
+            current.usageModelAliases,
+            usageModelAliasesPatch,
           ),
         }
       : {}),

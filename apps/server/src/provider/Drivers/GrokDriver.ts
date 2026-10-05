@@ -8,19 +8,22 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import * as ServerConfig from "../../config.ts";
+import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { CloudRuntimeService } from "../../cloud/runtime/CloudRuntimeService.ts";
 import { makeCloudExecutionSpawner } from "../../cloud/runtime/CloudExecutionSpawner.ts";
 import { makeGrokTextGeneration } from "../../textGeneration/GrokTextGeneration.ts";
+import {
+  GrokAdapterV2Driver,
+  type GrokAdapterV2DriverEnv,
+} from "../../orchestration-v2/Adapters/GrokAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
 import {
   buildInitialGrokProviderSnapshot,
   checkGrokProviderStatus,
   enrichGrokSnapshot,
 } from "../Layers/GrokProvider.ts";
-import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { readGrokAccount } from "../Layers/grokUsageLimits.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
@@ -74,15 +77,16 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
 };
 
 export type GrokDriverEnv =
+  | GrokAdapterV2DriverEnv
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
-  | ProviderEventLoggers
-  | ServerConfig
-  | ServerSettingsService;
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig
+  | ServerSettings.ServerSettingsService;
 
 export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -109,9 +113,8 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       const httpClient = yield* HttpClient.HttpClient;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const serverSettings = yield* ServerSettingsService;
-      const { cwd } = yield* ServerConfig;
-      const eventLoggers = yield* ProviderEventLoggers;
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const { cwd } = yield* ServerConfig.ServerConfig;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -137,7 +140,6 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
               sandboxPrefix: `t3-grok-${instanceId}`,
             })
           : undefined;
-      const providerSpawner = cloudTransport?.spawner ?? spawner;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -148,45 +150,45 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
           Effect.provideService(Path.Path, path),
         ),
       );
-      const adapter = yield* makeGrokAdapter(effectiveConfig, {
-        environment: processEnv,
-        ...(cloudTransport
-          ? {
-              childProcessSpawner: cloudTransport.spawner,
-              remoteCwdFor: cloudTransport.remoteCwdFor,
-            }
-          : {}),
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      const orchestrationAdapter = yield* GrokAdapterV2Driver.create({
         instanceId,
-      });
-      const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+        ...(cloudTransport ? { cloudTransport } : {}),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to build Grok orchestration adapter.",
+              cause,
+            }),
+        ),
       );
+      const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
 
       const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv, cwd).pipe(
-        Effect.filterOrElse(
-          (snapshot) =>
-            !(
-              effectiveConfig.enabled &&
-              snapshot.installed &&
-              snapshot.auth.status === "authenticated"
-            ),
-          (snapshot) =>
-            readGrokAccount(processEnv).pipe(
-              // The email lets clients recognize one account signed in on several environments.
-              Effect.map(({ email, usageLimits }) => ({
-                ...snapshot,
-                auth: email ? { ...snapshot.auth, email } : snapshot.auth,
-                usageLimits,
-              })),
-            ),
+        Effect.flatMap((snapshot) =>
+          effectiveConfig.enabled && snapshot.installed && snapshot.auth.status === "authenticated"
+            ? readGrokAccount(processEnv).pipe(
+                Effect.map(({ email, usageLimits }) => ({
+                  ...snapshot,
+                  auth: email ? { ...snapshot.auth, email } : snapshot.auth,
+                  usageLimits,
+                })),
+              )
+            : Effect.succeed(snapshot),
         ),
         Effect.map(stampIdentity),
         Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
         Effect.provideService(Crypto.Crypto, crypto),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, providerSpawner),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
@@ -249,7 +251,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
-        adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

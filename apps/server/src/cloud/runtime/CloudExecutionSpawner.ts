@@ -71,12 +71,33 @@ export interface CloudPtyOptions {
   readonly rows: number;
 }
 
-type CloudSpawnNode = (
+export type CloudSpawnNode = (
   command: ChildProcess.Command,
   pty?: CloudPtyOptions,
 ) => Effect.Effect<CloudProcess, PlatformError.PlatformError, Scope.Scope>;
 
 export type CloudRemoteCwdResolver = (cwd: string) => string | undefined;
+
+/**
+ * How a provider driver runs its agent when the instance points at a cloud
+ * sandbox instead of the local machine.
+ *
+ * Drivers build this once per instance (see `makeCloudExecutionSpawner`) and
+ * hand it to the orchestration adapter, which needs exactly two things: a
+ * spawner that launches inside the sandbox, and the mapping from a local
+ * workspace path to its remote counterpart for the paths that travel in
+ * provider protocol messages.
+ */
+export interface CloudExecutionTransport {
+  readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly remoteCwdFor: CloudRemoteCwdResolver;
+  /**
+   * Starts one process in the sandbox under a PTY. Adapters whose SDK owns
+   * process creation (the Claude Agent SDK) spawn through this instead of
+   * `spawner`, because the SDK never asks a spawner for a handle.
+   */
+  readonly spawnNode: CloudSpawnNode;
+}
 
 const cloudPlatformError = (cause: unknown): PlatformError.PlatformError =>
   PlatformError.systemError({

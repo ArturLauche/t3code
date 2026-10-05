@@ -5,13 +5,14 @@ import { expandHomePath } from "../pathExpansion.ts";
 export function mergeProviderInstanceEnvironment(
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
+  overrides: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
-  if (!environment || environment.length === 0) {
+  if ((!environment || environment.length === 0) && Object.keys(overrides).length === 0) {
     return baseEnv;
   }
 
-  const next: NodeJS.ProcessEnv = { ...baseEnv };
-  for (const variable of environment) {
+  const next: NodeJS.ProcessEnv = { ...baseEnv, ...overrides };
+  for (const variable of environment ?? []) {
     // Child processes do not apply shell expansion to environment values.
     next[variable.name] =
       variable.name === "CODEX_HOME" ||

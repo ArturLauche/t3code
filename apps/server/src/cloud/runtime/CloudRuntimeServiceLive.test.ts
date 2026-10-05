@@ -399,8 +399,9 @@ describe("CloudRuntimeServiceLive", () => {
     }),
   );
 
-  for (const unusableState of ["stopped", "error", "unknown"] as const) {
-    it.effect(`does not reuse a preparation sandbox in the ${unusableState} state`, () =>
+  it.effect.each(["stopped", "error", "unknown"] as const)(
+    "does not reuse a preparation sandbox in the %s state",
+    (unusableState) =>
       Effect.gen(function* () {
         const calls: Array<RecordedCall> = [];
         const state: { current: "running" | "paused" | "stopped" | "error" | "unknown" } = {
@@ -423,8 +424,7 @@ describe("CloudRuntimeServiceLive", () => {
         });
         assert.notEqual(second.sandboxId, first.sandboxId);
       }),
-    );
-  }
+  );
 
   it.effect("resumes and reuses a paused preparation sandbox", () =>
     Effect.gen(function* () {

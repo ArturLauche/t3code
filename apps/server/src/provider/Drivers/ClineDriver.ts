@@ -1,10 +1,10 @@
 /**
  * ClineDriver — `ProviderDriver` for the Cline CLI runtime.
  *
- * Cline is driven entirely over ACP (`cline --acp`). The managed provider
- * status check is the discovery path: it runs `cline --version` for
- * installation state and one throwaway ACP session for authentication and the
- * model catalog, because Cline has no non-interactive auth-status command.
+ * Cline is driven entirely over ACP (`cline --acp`). The managed provider status
+ * check is the discovery path: it runs `cline --version` for installation state
+ * and one throwaway ACP session for authentication and the model catalog, because
+ * Cline has no non-interactive auth-status command.
  *
  * Background text generation is intentionally absent. Cline's ACP build
  * hard-disables reasoning, boots an interactive session on the user's account,
@@ -25,16 +25,19 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import * as ServerConfig from "../../config.ts";
+import {
+  ClineAdapterV2Driver,
+  type ClineAdapterV2DriverEnv,
+} from "../../orchestration-v2/Adapters/ClineAdapterV2.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { makeUnsupportedTextGeneration } from "../../textGeneration/unsupportedTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeClineAdapter } from "../Layers/ClineAdapter.ts";
 import {
   buildInitialClineProviderSnapshot,
   checkClineProviderStatus,
 } from "../Layers/ClineProvider.ts";
-import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -69,13 +72,14 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 export type ClineDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
+  | ClineAdapterV2DriverEnv
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
-  | ProviderEventLoggers
-  | ServerConfig
-  | ServerSettingsService;
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig
+  | ServerSettings.ServerSettingsService;
 
 export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -92,8 +96,8 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const httpClient = yield* HttpClient.HttpClient;
       const path = yield* Path.Path;
-      const serverSettings = yield* ServerSettingsService;
-      const eventLoggers = yield* ProviderEventLoggers;
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -161,11 +165,24 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
         ),
       );
 
-      const adapter = yield* makeClineAdapter(effectiveConfig, {
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      const orchestrationAdapter = yield* ClineAdapterV2Driver.create({
         instanceId,
-      });
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to build the Cline orchestration adapter.",
+              cause,
+            }),
+        ),
+      );
 
       return {
         instanceId,
@@ -175,7 +192,7 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         // Declared unsupported through the snapshot's `supportsTextGeneration`,
         // so this only answers if a caller reaches for it anyway.
         textGeneration: makeUnsupportedTextGeneration(DRIVER_KIND),

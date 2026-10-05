@@ -133,6 +133,25 @@ export const ProviderInstanceConfig = Schema.Struct({
 });
 export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
 
+/** Atomic mutation for one provider-instance map entry. */
+export const ProviderInstanceMutation = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal("create"),
+    instanceId: ProviderInstanceId,
+    instance: ProviderInstanceConfig,
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("upsert"),
+    instanceId: ProviderInstanceId,
+    instance: ProviderInstanceConfig,
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("remove"),
+    instanceId: ProviderInstanceId,
+  }),
+]);
+export type ProviderInstanceMutation = typeof ProviderInstanceMutation.Type;
+
 /**
  * Patch form used when replacing the provider-instance map. An omitted
  * execution target means an older client did not know about cloud routing, so

@@ -147,8 +147,11 @@ const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
+const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
+const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const FREEBUFF_DRIVER_KIND = ProviderDriverKind.make("freebuff");
+const CLINE_DRIVER_KIND = ProviderDriverKind.make("cline");
 
 export const DEFAULT_MODEL = "gpt-6-astra";
 
@@ -175,6 +178,9 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CURSOR_DRIVER_KIND]: "auto",
   // Product slug, not an ACP model id. The Grok adapter treats it as "the session's current model".
   [GROK_DRIVER_KIND]: "grok-build",
+  [ACP_REGISTRY_DRIVER_KIND]: "default",
+  // "default" defers to the user's own Pi settings.json model selection.
+  [PI_DRIVER_KIND]: "default",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
   [FREEBUFF_DRIVER_KIND]: FREEBUFF_DEFAULT_MODEL,
   [ProviderDriverKind.make("antigravity")]: ANTIGRAVITY_DEFAULT_MODEL,
@@ -225,7 +231,9 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
   [GROK_DRIVER_KIND]: "Grok",
-  [ProviderDriverKind.make("cline")]: "Cline",
+  [ACP_REGISTRY_DRIVER_KIND]: "ACP Registry",
+  [PI_DRIVER_KIND]: "Pi",
+  [CLINE_DRIVER_KIND]: "Cline",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
   [FREEBUFF_DRIVER_KIND]: "Freebuff",
 };

@@ -3,10 +3,9 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as EffectAcpErrors from "effect-acp/errors";
-import * as EffectAcpSchema from "effect-acp/schema";
+import * as EffectAcpSchema from "effect-acp/compat";
+import * as EffectAcpV2 from "effect-acp/schema";
 import { ProviderDriverKind } from "@t3tools/contracts";
-
-import { ProviderAdapterRequestError } from "../Errors.ts";
 
 import {
   applyClineAcpModelSelection,
@@ -19,10 +18,11 @@ import {
   currentClineModelIdFromSessionSetup,
   findClineModelConfigOption,
   resolveClineActModeId,
+  ClineModelSelectionError,
 } from "./ClineAcpSupport.ts";
 
-const decodeResponse = Schema.decodeUnknownSync(EffectAcpSchema.NewSessionResponse);
-const decodeInitialize = Schema.decodeUnknownSync(EffectAcpSchema.InitializeResponse);
+const decodeResponse = Schema.decodeUnknownSync(EffectAcpV2.NewSessionResponse);
+const decodeInitialize = Schema.decodeUnknownSync(EffectAcpV2.InitializeResponse);
 
 const CLINE_PROVIDER_OPTION = {
   id: "provider",
@@ -48,18 +48,22 @@ const CLINE_MODEL_OPTION = {
   ],
 } as const;
 
+type ClineSessionSetup = Parameters<typeof clineModelsFromSessionSetup>[0];
+
+// Cline speaks ACP v1, so its session setup carries `id`-keyed config options
+// and mode/model state on the response itself. No v2 decoding happens here.
 const clineSessionSetup = (overrides?: {
   readonly configOptions?: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null;
   readonly models?: EffectAcpSchema.SessionModelState | null;
-}) =>
-  decodeResponse({
+}): ClineSessionSetup =>
+  ({
     sessionId: "cline-session-1",
     modes: { currentModeId: "act", availableModes: [{ id: "act", name: "Act" }] },
     ...(overrides?.configOptions === undefined
       ? { configOptions: [CLINE_PROVIDER_OPTION, CLINE_MODEL_OPTION] }
       : { configOptions: overrides.configOptions }),
     ...(overrides?.models === undefined ? {} : { models: overrides.models }),
-  });
+  }) as ClineSessionSetup;
 
 describe("buildClineAcpSpawnInput", () => {
   it("spawns `cline --acp` with no other run flags", () => {
@@ -186,8 +190,8 @@ describe("clineModelsFromSessionSetup", () => {
       type: "select",
       currentValue: "b/model",
       options: [
-        { group: "anthropic", name: "Anthropic", options: [{ value: "a/model", name: "A" }] },
-        { group: "other", name: "Other", options: [{ value: "b/model", name: "B" }] },
+        { groupId: "anthropic", name: "Anthropic", options: [{ value: "a/model", name: "A" }] },
+        { groupId: "other", name: "Other", options: [{ value: "b/model", name: "B" }] },
       ],
     } as const;
     const models = clineModelsFromSessionSetup(clineSessionSetup({ configOptions: [grouped] }));
@@ -260,10 +264,10 @@ describe("currentClineModelIdFromSessionSetup", () => {
 
 describe("applyClineAcpModelSelection", () => {
   const mapAcpError = (cause: EffectAcpErrors.AcpError) =>
-    new ProviderAdapterRequestError({
-      provider: ProviderDriverKind.make("cline"),
+    new EffectAcpErrors.AcpRequestError({
+      code: -32000,
       method: "session/set_config_option",
-      detail: cause.message,
+      errorMessage: cause.message,
     });
   const makeRuntime = (configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>) => {
     const calls: Array<{ configId: string; value: string | boolean }> = [];
@@ -327,7 +331,7 @@ describe("applyClineAcpModelSelection", () => {
     Effect.gen(function* () {
       const runtime = makeRuntime([CLINE_PROVIDER_OPTION, CLINE_MODEL_OPTION]);
       const error = yield* select(runtime, "retired/model").pipe(Effect.flip);
-      assert.strictEqual(error._tag, "ClineModelSelectionError");
+      assert.instanceOf(error, ClineModelSelectionError);
       assert.deepStrictEqual(runtime.calls, []);
     }),
   );
@@ -484,10 +488,10 @@ describe("classifyClineAuthFailure", () => {
 
 describe("clineInitializeResultForSnapshot", () => {
   it("reports image prompts as unsupported, because Cline drops them", () => {
-    const initialize = decodeInitialize({
+    const initialize: EffectAcpSchema.InitializeResponse = {
       protocolVersion: 1,
       agentCapabilities: { loadSession: true, promptCapabilities: { image: true, audio: false } },
-    });
+    };
     const snapshot = clineInitializeResultForSnapshot(initialize);
     assert.strictEqual(snapshot.agentCapabilities?.promptCapabilities?.image, false);
     // Everything else is preserved: T3 must not hide what the agent can do.
