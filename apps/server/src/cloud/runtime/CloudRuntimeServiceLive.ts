@@ -29,15 +29,18 @@ import * as Schema from "effect/Schema";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
-import { cloudRuntimeCredentialName } from "./credentialName.ts";
+import { cloudRuntimeCredentialName } from "@t3tools/cloud-runtime/credentialName";
 import { isManagedSandbox } from "./sandboxOwnership.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { CloudRuntimeService, type CloudRuntimeServiceShape } from "./CloudRuntimeService.ts";
+import {
+  CloudRuntimeService,
+  type CloudRuntimeServiceShape,
+} from "@t3tools/cloud-runtime/CloudRuntimeService";
 import {
   makeCloudVendorAdapter,
   type CloudCommandSpec,
   type CloudVendorAdapter,
-} from "./VendorAdapter.ts";
+} from "@t3tools/cloud-runtime/VendorAdapter";
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 

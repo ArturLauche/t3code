@@ -21,8 +21,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { HttpClient } from "effect/http";
+import { ChildProcessSpawner } from "effect/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
@@ -30,33 +30,31 @@ import {
   ClineAdapterV2Driver,
   type ClineAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/ClineAdapterV2.ts";
-import * as ServerSettings from "../../serverSettings.ts";
 import { makeUnsupportedTextGeneration } from "../../textGeneration/unsupportedTextGeneration.ts";
-import { ProviderDriverError } from "../Errors.ts";
-import {
-  buildInitialClineProviderSnapshot,
-  checkClineProviderStatus,
-} from "../Layers/ClineProvider.ts";
-import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
+import { buildInitialClineProviderSnapshot, checkClineProviderStatus } from "../ClineProvider.ts";
+import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+} from "@t3tools/provider-core/server/driver";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
-import { withInstanceIdentity } from "./instanceIdentity.ts";
+} from "@t3tools/provider-core/server/snapshotSettings";
+import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIdentity";
 
 const decodeClineSettings = Schema.decodeSync(ClineSettings);
 
@@ -79,7 +77,8 @@ export type ClineDriverEnv =
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
   | ServerConfig.ServerConfig
-  | ServerSettings.ServerSettingsService;
+  | ProviderHost.ProviderHost
+  | ProviderLatestVersions.ProviderLatestVersions;
 
 export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -96,9 +95,9 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const httpClient = yield* HttpClient.HttpClient;
       const path = yield* Path.Path;
-      const serverSettings = yield* ServerSettings.ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -122,7 +121,7 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
         ),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClineSettings>>({
         resolveMaintenance,
         getSettings: snapshotSettings.getSettings,
@@ -142,7 +141,12 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
             Effect.flatMap((maintenanceCapabilities) =>
               enrichProviderSnapshotWithVersionAdvisory(currentSnapshot, maintenanceCapabilities, {
                 enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-              }),
+              }).pipe(
+                Effect.provideService(
+                  ProviderLatestVersions.ProviderLatestVersions,
+                  latestVersions,
+                ),
+              ),
             ),
             Effect.flatMap((enriched) => publishSnapshot(enriched)),
             Effect.catchCause((cause) =>

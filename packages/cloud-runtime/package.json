@@ -1,0 +1,46 @@
+{
+  "name": "@t3tools/cloud-runtime",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./CloudExecutionSpawner": {
+      "types": "./src/CloudExecutionSpawner.ts",
+      "import": "./src/CloudExecutionSpawner.ts"
+    },
+    "./CloudProcess": {
+      "types": "./src/CloudProcess.ts",
+      "import": "./src/CloudProcess.ts"
+    },
+    "./CloudRuntimeService": {
+      "types": "./src/CloudRuntimeService.ts",
+      "import": "./src/CloudRuntimeService.ts"
+    },
+    "./VendorAdapter": {
+      "types": "./src/VendorAdapter.ts",
+      "import": "./src/VendorAdapter.ts"
+    },
+    "./credentialName": {
+      "types": "./src/credentialName.ts",
+      "import": "./src/credentialName.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/provider-core": "workspace:*",
+    "@t3tools/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@daytona/sdk": "0.216.1",
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "e2b": "2.51.0",
+    "novita-sandbox": "2.1.1",
+    "vite-plus": "catalog:"
+  }
+}

@@ -35,13 +35,16 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as AcpCompat from "effect-acp/compat";
 
-import { findSessionConfigOption } from "./AcpRuntimeModel.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
-import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import { findSessionConfigOption } from "@t3tools/provider-acp/server/runtimeModel";
+// @effect-diagnostics nodeBuiltinImport:off - Resolves a user-typed `~` before a
+// spawn, where no shell or Effect service is in play.
+import * as NodeOS from "node:os";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
 const CLINE_BINARY = "cline";
 
@@ -83,7 +86,7 @@ function clineDataDirEnv(clineSettings: ClineAcpRuntimeClineSettings | null | un
   // Expanded like every other provider's path setting: the child process does
   // not run a shell, so a literal `~/...` would be passed through as a
   // directory named "~" instead of the user's home.
-  const resolved = expandHomePath(dataDir);
+  const resolved = expandHomePath(dataDir, NodeOS.homedir());
   return {
     [CLINE_DIR_ENV]: resolved,
     [CLINE_DATA_DIR_ENV]: resolved,
@@ -99,7 +102,7 @@ export function buildClineAcpSpawnInput(
     // Expanded for the same reason as the data dir: a spawn has no shell to
     // resolve `~`, and a path the user typed in Settings should work the way it
     // does for the other providers.
-    command: expandHomePath(clineSettings?.binaryPath?.trim() || CLINE_BINARY),
+    command: expandHomePath(clineSettings?.binaryPath?.trim() || CLINE_BINARY, NodeOS.homedir()),
     args: clineAcpSpawnArgs(),
     cwd,
     ...(environment

@@ -25,13 +25,13 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import type { ServerConfig } from "../../config.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
-import { FREEBUFF_PROVIDER } from "../../provider/Layers/FreebuffProvider.ts";
-import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { FREEBUFF_PROVIDER } from "../../provider/FreebuffProvider.ts";
+import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   classifyFreebuffScreen,
   extractVisibleAssistantText,

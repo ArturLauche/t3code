@@ -13,11 +13,11 @@ import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as AcpCompat from "effect-acp/compat";
 
-import type { CloudRemoteCwdResolver } from "../../cloud/runtime/CloudExecutionSpawner.ts";
+import type { CloudExecutionCwdResolver } from "@t3tools/provider-core/server/cloudExecution";
 import * as ServerConfig from "../../config.ts";
 import { acpPermissionDisposition } from "../../provider/acp/AcpClientPolicy.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
@@ -128,7 +128,7 @@ export interface ClineAdapterV2Options {
   readonly serverConfig: ServerConfig.ServerConfig["Service"];
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   /** Maps a local workspace path to its cloud-sandbox path, when remote. */
-  readonly remoteCwdFor?: CloudRemoteCwdResolver | undefined;
+  readonly remoteCwdFor?: CloudExecutionCwdResolver | undefined;
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   readonly makeRuntime?: AcpAdapterV2Flavor["makeRuntime"];
