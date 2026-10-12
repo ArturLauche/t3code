@@ -1,4 +1,5 @@
 import {
+  ClineSettings,
   CloudRuntimeId,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
@@ -73,6 +74,7 @@ describe("serverSettings helpers", () => {
       worktreeOnMerge: true,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
+      worktreeKeepWhen: "uncommitted-changes",
       browserArtifactsAfterDays: null,
       logsAfterDays: 30,
     });
@@ -99,6 +101,17 @@ describe("serverSettings helpers", () => {
     expect(removed.cloudRuntimeInstances[secondaryId]).toBeDefined();
   });
 
+  it("replaces GitHub host choices so a cleared account pin does not survive", () => {
+    const pinned = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      github: { hosts: { "github.com": { account: "work", enabled: true } } },
+    });
+    expect(pinned.github.hosts).toEqual({ "github.com": { account: "work", enabled: true } });
+    expect(
+      applyServerSettingsPatch(pinned, {
+        github: { hosts: { "github.com": { enabled: false } } },
+      }).github.hosts,
+    ).toEqual({ "github.com": { enabled: false } });
+  });
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
     const host = { id: "mini", label: "Mac mini", target: "mini" };
     const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { deviceHosts: [host] });
@@ -855,30 +868,47 @@ describe("serverSettings helpers", () => {
 });
 
 describe("Cline provider settings", () => {
-  it("applies a Cline patch without disturbing the other providers", () => {
+  it("applies a Cline config without disturbing the other instances", () => {
+    const cline = ProviderInstanceId.make("cline");
     const current = applyServerSettingsPatch(Schema.decodeSync(ServerSettings)({}), {
-      providers: { cline: { enabled: true } },
+      providerInstances: { [cline]: { driver: ProviderDriverKind.make("cline"), config: {} } },
     });
     const patched = applyServerSettingsPatch(current, {
-      providers: { cline: { binaryPath: "/usr/local/bin/cline", dataDir: "/srv/cline-two" } },
+      providerInstances: {
+        [cline]: {
+          driver: ProviderDriverKind.make("cline"),
+          config: { binaryPath: "/usr/local/bin/cline", dataDir: "/srv/cline-two" },
+        },
+      },
     });
 
-    expect(patched.providers.cline.enabled).toBe(true);
-    expect(patched.providers.cline.binaryPath).toBe("/usr/local/bin/cline");
-    expect(patched.providers.cline.dataDir).toBe("/srv/cline-two");
-    // Everything the patch did not mention keeps its value.
-    expect(patched.providers.codex.enabled).toBe(true);
-    expect(patched.providers.grok.enabled).toBe(false);
+    const config = patched.providerInstances[cline]!.config as {
+      binaryPath: string;
+      dataDir: string;
+    };
+    expect(config.binaryPath).toBe("/usr/local/bin/cline");
+    expect(config.dataDir).toBe("/srv/cline-two");
   });
 
   it("resolves an empty custom binary path to the CLI on PATH", () => {
     // The settings form omits the key when the user clears it, and a blank
     // value still has to decode to the PATH-resolved default rather than an
     // empty command the spawn would fail on.
-    const blank = Schema.decodeSync(ServerSettings)({
-      providers: { cline: { binaryPath: "   " } },
-    });
-    expect(blank.providers.cline.binaryPath).toBe("cline");
-    expect(Schema.decodeSync(ServerSettings)({}).providers.cline.binaryPath).toBe("cline");
+    const blank = Schema.decodeSync(ClineSettings)({ binaryPath: "   " });
+    expect(blank.binaryPath).toBe("cline");
+    expect(Schema.decodeSync(ClineSettings)({}).binaryPath).toBe("cline");
+  });
+});
+
+describe("worktreesDirectory", () => {
+  it("remembers previous custom locations so their worktrees stay managed", () => {
+    const first = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { worktreesDirectory: "/a" });
+    expect(first.previousWorktreesDirectories).toEqual([]);
+    const second = applyServerSettingsPatch(first, { worktreesDirectory: "/b" });
+    expect(second.previousWorktreesDirectories).toEqual(["/a"]);
+    const reset = applyServerSettingsPatch(second, { worktreesDirectory: "" });
+    expect(reset.previousWorktreesDirectories).toEqual(["/a", "/b"]);
+    const back = applyServerSettingsPatch(reset, { worktreesDirectory: "/a" });
+    expect(back.previousWorktreesDirectories).toEqual(["/b"]);
   });
 });

@@ -4,9 +4,9 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { cloudRuntimeCredentialName } from "./credentialName.ts";
+import { cloudRuntimeCredentialName } from "@t3tools/cloud-runtime/credentialName";
 import { retireCloudRuntimes, type CloudRuntimeConfigs } from "./CloudSandboxRetirement.ts";
-import type { CloudVendorAdapter } from "./VendorAdapter.ts";
+import type { CloudVendorAdapter } from "@t3tools/cloud-runtime/VendorAdapter";
 
 const environmentId = EnvironmentId.make("retirement-environment");
 const runtimeId = CloudRuntimeId.make("primary");

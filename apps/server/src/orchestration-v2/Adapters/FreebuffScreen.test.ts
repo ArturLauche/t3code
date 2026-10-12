@@ -8,7 +8,7 @@ import {
 import {
   FREEBUFF_ENTER_TO_LOGIN_SCREEN_0_1_6,
   FREEBUFF_LOGIN_SCREEN_0_1_6,
-} from "../../provider/Layers/freebuffScreens.ts";
+} from "../../provider/freebuffScreens.ts";
 
 /**
  * The screen rules are what decides whether a Freebuff turn is running, needs

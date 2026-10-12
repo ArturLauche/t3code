@@ -1,13 +1,13 @@
 import {
-  isProviderDriverKind,
   isProviderAvailable,
+  isUnconfiguredDefaultInstanceEnabled,
   resolveProviderInstanceEnabled,
   isProviderTextGenerationCapable,
   type ModelSelection,
   type ProjectId,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   ProviderInstanceConfig,
   ProviderInstanceId,
   type ServerProvider,
@@ -61,14 +61,6 @@ export function resolveProjectAutoPull(
   );
 }
 
-type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["providers"]];
-
-const getLegacyProviderSettings = (
-  settings: ServerSettings,
-  provider: ProviderDriverKind,
-): LegacyProviderSettings | undefined =>
-  (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider];
-
 export function isModelSelectionProviderEnabled(
   settings: ServerSettings,
   selection: ModelSelection,
@@ -78,10 +70,7 @@ export function isModelSelectionProviderEnabled(
     return resolveProviderInstanceEnabled(instanceConfig);
   }
 
-  return (
-    isProviderDriverKind(selection.instanceId) &&
-    getLegacyProviderSettings(settings, selection.instanceId)?.enabled === true
-  );
+  return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
 export function resolveSourceControlWriterModelSelection(
@@ -378,6 +367,7 @@ export function applyServerSettingsPatch(
               ? {
                   mode: "custom" as const,
                   rules: {
+                    worktreeKeepWhen: next.storageCleanup.worktreeKeepWhen,
                     worktreeAfterDays: next.storageCleanup.worktreeAfterDays,
                     worktreeOnMerge: next.storageCleanup.worktreeOnMerge,
                     worktreeOnDelete: next.storageCleanup.worktreeOnDelete,
@@ -418,6 +408,24 @@ export function applyServerSettingsPatch(
             cloudRuntimeInstancesPatch,
           ),
         }
+      : {}),
+    ...(patch.worktreesDirectory !== undefined &&
+    patch.worktreesDirectory !== current.worktreesDirectory
+      ? {
+          previousWorktreesDirectories: [
+            ...current.previousWorktreesDirectories.filter(
+              (directory) => directory !== patch.worktreesDirectory,
+            ),
+            ...(current.worktreesDirectory !== "" &&
+            !current.previousWorktreesDirectories.includes(current.worktreesDirectory)
+              ? [current.worktreesDirectory]
+              : []),
+          ],
+        }
+      : {}),
+    // Host replacement: deepMerge would keep a cleared account pin.
+    ...(patch.github?.hosts !== undefined
+      ? { github: { ...next.github, hosts: patch.github.hosts } }
       : {}),
     ...(projectSettingsOverridesPatch !== undefined
       ? {

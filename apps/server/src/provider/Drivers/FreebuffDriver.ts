@@ -3,36 +3,37 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { ServerConfig } from "../../config.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { makeFreebuffAdapterV2 } from "../../orchestration-v2/Adapters/FreebuffAdapterV2.ts";
 import { makeUnsupportedTextGeneration } from "../../textGeneration/unsupportedTextGeneration.ts";
-import { ProviderDriverError } from "../Errors.ts";
+import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import {
   buildInitialFreebuffProviderSnapshot,
   checkFreebuffProviderStatus,
   FREEBUFF_PROVIDER,
-} from "../Layers/FreebuffProvider.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+} from "../FreebuffProvider.ts";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/driver";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
+} from "@t3tools/provider-core/server/snapshotSettings";
 import { ensureFreebuffConfigDir, resolveFreebuffConfigDir } from "./FreebuffConfig.ts";
-import { withInstanceIdentity } from "./instanceIdentity.ts";
+import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIdentity";
 
 const decodeFreebuffSettings = Schema.decodeSync(FreebuffSettings);
 const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
@@ -60,7 +61,7 @@ export type FreebuffDriverEnv =
   | IdAllocator.IdAllocatorV2
   | Path.Path
   | ServerConfig
-  | ServerSettingsService;
+  | ProviderHost.ProviderHost;
 
 export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv> = {
   driverKind: FREEBUFF_PROVIDER,
@@ -77,12 +78,11 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
       const path = yield* Path.Path;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const serverConfig = yield* ServerConfig;
-      const serverSettings = yield* ServerSettingsService;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const effectiveConfig = {
         ...config,
         enabled,
-        binaryPath: expandHomePath(config.binaryPath),
+        binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       } satisfies FreebuffSettings;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: FREEBUFF_PROVIDER,
@@ -126,7 +126,7 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
         );
       }
       const processEnvironment: NodeJS.ProcessEnv = {
-        ...mergeProviderInstanceEnvironment(environment),
+        ...(yield* mergeProviderInstanceEnvironment(environment)),
         FREEBUFF_CONFIG_DIR: configDir,
       };
       const readIsAuthenticated = Effect.gen(function* () {
@@ -160,7 +160,7 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
       );
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<FreebuffSettings>>(
         {
           resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),

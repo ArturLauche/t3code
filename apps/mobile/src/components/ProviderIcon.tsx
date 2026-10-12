@@ -6,6 +6,7 @@ import { useState } from "react";
 import { resolveOfficialAcpRegistryIconUrl } from "@t3tools/contracts";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { AppText as Text } from "./AppText";
+import { getProviderClient } from "../lib/providerClients";
 
 type ProviderIconProps = {
   readonly provider: string | null | undefined;
@@ -92,101 +93,20 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
 
-  if (props.provider === "cline") {
-    const fill = isDarkMode ? "#F5F5F5" : "#0F0F0F";
+  const packageIcon = getProviderClient(props.provider)?.icon;
+  if (packageIcon) {
+    const themeFill = (fill: { readonly light: string; readonly dark: string }) =>
+      isDarkMode ? fill.dark : fill.light;
     return (
-      <Svg width={size} height={size} viewBox="0 0 92 96" fill="none">
-        <Path
-          fill={fill}
-          transform="translate(0 0.5)"
-          fillRule="nonzero"
-          d="M65.4492701,16.3 C76.3374701,16.3 85.1635558,25.16479 85.1635558,36.1 L85.1635558,42.7 L90.9027661,54.1647464 C91.4694141,55.2966923 91.4668177,56.6300535 90.8957658,57.7597839 L85.1635558,69.1 L85.1635558,75.7 C85.1635558,86.63554 76.3374701,95.5 65.4492701,95.5 L26.0206986,95.5 C15.1328272,95.5 6.30641291,86.63554 6.30641291,75.7 L6.30641291,69.1 L0.448507752,57.7954874 C-0.14693501,56.6464093 -0.149634367,55.2802504 0.441262896,54.1288283 L6.30641291,42.7 L6.30641291,36.1 C6.30641291,25.16479 15.1328272,16.3 26.0206986,16.3 L65.4492701,16.3 Z M62.9301895,22 L29.189529,22 C19.8723267,22 12.3191987,29.5552188 12.3191987,38.875 L12.3191987,44.5 L7.44288578,53.9634655 C6.84794449,55.1180686 6.85066096,56.4896598 7.45017099,57.6418974 L12.3191987,67 L12.3191987,72.625 C12.3191987,81.9450625 19.8723267,89.5 29.189529,89.5 L62.9301895,89.5 C72.2476729,89.5 79.8005198,81.9450625 79.8005198,72.625 L79.8005198,67 L84.5682187,57.6061395 C85.1432011,56.473244 85.1458141,55.1345713 84.5752587,53.9994398 L79.8005198,44.5 L79.8005198,38.875 C79.8005198,29.5552188 72.2476729,22 62.9301895,22 Z"
-        />
-        <Circle cx="45.7349843" cy="11.5" r="11" fill={fill} />
-        <Rect
-          x="31"
-          y="45"
-          width="5"
-          height="22"
-          rx="2.5"
-          fill={fill}
-          stroke={fill}
-          strokeWidth="8"
-        />
-        <Rect
-          x="55"
-          y="45"
-          width="5"
-          height="22"
-          rx="2.5"
-          fill={fill}
-          stroke={fill}
-          strokeWidth="8"
-        />
-      </Svg>
-    );
-  }
-
-  if (props.provider === "freebuff") {
-    return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M4 5.5h16v13H4zM7 9l3 3-3 3m5 0h5"
-          stroke={mono}
-          strokeWidth={1.8}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </Svg>
-    );
-  }
-
-  if (props.provider === "grok") {
-    const fill = isDarkMode ? "#F5F5F5" : "#0F0F0F";
-    return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <Path
-          fill={fill}
-          d="M9.26905 15.284L17.2479 9.36086C17.6391 9.07047 18.1981 9.18374 18.3845 9.63478C19.3655 12.0135 18.9272 14.8721 16.9755 16.8349C15.0238 18.7976 12.3082 19.228 9.8261 18.2477L7.1146 19.5102C11.0037 22.1834 15.7263 21.5223 18.6774 18.5525C21.0182 16.1985 21.7432 12.9897 21.0653 10.0961L21.0714 10.1023C20.0884 5.85143 21.3131 4.15233 23.8218 0.677913C23.8812 0.595532 23.9406 0.513151 24 0.428711L20.6987 3.74866V3.73836L9.267 15.2861"
-        />
-        <Path
-          fill={fill}
-          d="M7.62249 16.7237C4.83113 14.0422 5.3124 9.89222 7.69417 7.49905C9.45541 5.72786 12.341 5.00497 14.86 6.06768L17.5653 4.81138C17.0779 4.45714 16.4533 4.07613 15.7365 3.80839C12.4966 2.46764 8.6178 3.13492 5.98413 5.78141C3.45081 8.32904 2.65415 12.2463 4.02219 15.5889C5.04412 18.0871 3.36889 19.8541 1.68137 21.6377C1.08337 22.2699 0.483318 22.9022 0 23.5716L7.62045 16.7257"
-        />
-      </Svg>
-    );
-  }
-
-  if (props.provider === "cursor") {
-    return (
-      <Svg width={size} height={size} viewBox="0 0 466.73 532.09" fill="none">
-        <Path
-          fill={isDarkMode ? "#EDECEC" : "#26251E"}
-          d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z"
-        />
-      </Svg>
-    );
-  }
-
-  if (props.provider === "pi") {
-    const foreground = isDarkMode ? "#F5F5F5" : "#0F0F0F";
-    return (
-      <Svg width={size} height={size} viewBox="165.29 165.29 469.43 469.43" fill="none">
-        <Path
-          fill={foreground}
-          fillRule="evenodd"
-          d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
-        />
-        <Path fill={foreground} d="M517.36 400H634.72V634.72H517.36Z" />
-      </Svg>
-    );
-  }
-
-  if (props.provider === "opencode") {
-    return (
-      <Svg width={size} height={size} viewBox="0 0 32 40" fill="none">
-        <Path d="M24 32H8V16H24V32Z" fill={isDarkMode ? "#4B4646" : "#CFCECD"} />
-        <Path d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill={isDarkMode ? "#F1ECEC" : "#211E1E"} />
+      <Svg width={size} height={size} viewBox={packageIcon.viewBox} fill="none">
+        {packageIcon.paths.map((path) => (
+          <Path
+            key={path.d}
+            d={path.d}
+            fillRule={path.fillRule}
+            fill={themeFill(path.fill ?? packageIcon.fill)}
+          />
+        ))}
       </Svg>
     );
   }

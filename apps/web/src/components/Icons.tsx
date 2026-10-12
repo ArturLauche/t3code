@@ -364,50 +364,6 @@ export const CursorIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
-export const FreebuffIcon: Icon = ({ className, ...props }) => (
-  <svg {...props} viewBox="0 0 24 24" fill="none" className={cn("stroke-current", className)}>
-    <path d="M4 5.5h16v13H4z" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="m7 9 3 3-3 3m5 0h5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-export const GrokIcon: Icon = ({ className, ...props }) => (
-  <svg
-    {...props}
-    viewBox="0 0 24 24"
-    fill="none"
-    className={cn("fill-[#0F0F0F] dark:fill-[#F5F5F5]", className)}
-  >
-    <path d="M9.26905 15.284L17.2479 9.36086C17.6391 9.07047 18.1981 9.18374 18.3845 9.63478C19.3655 12.0135 18.9272 14.8721 16.9755 16.8349C15.0238 18.7976 12.3082 19.228 9.8261 18.2477L7.1146 19.5102C11.0037 22.1834 15.7263 21.5223 18.6774 18.5525C21.0182 16.1985 21.7432 12.9897 21.0653 10.0961L21.0714 10.1023C20.0884 5.85143 21.3131 4.15233 23.8218 0.677913C23.8812 0.595532 23.9406 0.513151 24 0.428711L20.6987 3.74866V3.73836L9.267 15.2861" />
-    <path d="M7.62249 16.7237C4.83113 14.0422 5.3124 9.89222 7.69417 7.49905C9.45541 5.72786 12.341 5.00497 14.86 6.06768L17.5653 4.81138C17.0779 4.45714 16.4533 4.07613 15.7365 3.80839C12.4966 2.46764 8.6178 3.13492 5.98413 5.78141C3.45081 8.32904 2.65415 12.2463 4.02219 15.5889C5.04412 18.0871 3.36889 19.8541 1.68137 21.6377C1.08337 22.2699 0.483318 22.9022 0 23.5716L7.62045 16.7257" />
-  </svg>
-);
-
-// Cline's mark is a rounded square with a pin and two bars. It is painted with
-// explicit brand fills rather than `currentColor` so it stays legible against
-// any surface a caller tints it with.
-export const ClineIcon: Icon = ({ className, ...props }) => (
-  <svg
-    {...props}
-    viewBox="0 0 92 96"
-    className={cn(
-      "fill-[#0F0F0F] stroke-[#0F0F0F] dark:fill-[#F5F5F5] dark:stroke-[#F5F5F5]",
-      className,
-    )}
-  >
-    <g transform="translate(0 0.5)">
-      <path
-        stroke="none"
-        fillRule="nonzero"
-        d="M65.4492701,16.3 C76.3374701,16.3 85.1635558,25.16479 85.1635558,36.1 L85.1635558,42.7 L90.9027661,54.1647464 C91.4694141,55.2966923 91.4668177,56.6300535 90.8957658,57.7597839 L85.1635558,69.1 L85.1635558,75.7 C85.1635558,86.63554 76.3374701,95.5 65.4492701,95.5 L26.0206986,95.5 C15.1328272,95.5 6.30641291,86.63554 6.30641291,75.7 L6.30641291,69.1 L0.448507752,57.7954874 C-0.14693501,56.6464093 -0.149634367,55.2802504 0.441262896,54.1288283 L6.30641291,42.7 L6.30641291,36.1 C6.30641291,25.16479 15.1328272,16.3 26.0206986,16.3 L65.4492701,16.3 Z M62.9301895,22 L29.189529,22 C19.8723267,22 12.3191987,29.5552188 12.3191987,38.875 L12.3191987,44.5 L7.44288578,53.9634655 C6.84794449,55.1180686 6.85066096,56.4896598 7.45017099,57.6418974 L12.3191987,67 L12.3191987,72.625 C12.3191987,81.9450625 19.8723267,89.5 29.189529,89.5 L62.9301895,89.5 C72.2476729,89.5 79.8005198,81.9450625 79.8005198,72.625 L79.8005198,67 L84.5682187,57.6061395 C85.1432011,56.473244 85.1458141,55.1345713 84.5752587,53.9994398 L79.8005198,44.5 L79.8005198,38.875 C79.8005198,29.5552188 72.2476729,22 62.9301895,22 Z"
-      />
-      <circle cx="45.7349843" cy="11" r="11" stroke="none" />
-      <rect x="31" y="44.5" width="5" height="22" rx="2.5" strokeWidth="8" />
-      <rect x="55" y="44.5" width="5" height="22" rx="2.5" strokeWidth="8" />
-    </g>
-  </svg>
-);
-
 export const TraeIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 24 24" fill="currentColor">
     {/* Back rectangle: left strip + bottom strip drawn separately — empty bottom-left corner is the gap between them */}
@@ -713,32 +669,6 @@ export const AntigravityIcon: Icon = (props) => (
   </svg>
 );
 
-export const OpenCodeIcon: Icon = (props) => (
-  <svg {...props} viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <g clipPath="url(#opencode__clip0_1311_94969)">
-      <path
-        data-opencode-hole="true"
-        className="dark:hidden"
-        d="M24 32H8V16H24V32Z"
-        fill="#CFCECD"
-      />
-      <path className="dark:hidden" d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#211E1E" />
-      <path
-        data-opencode-hole="true"
-        className="hidden dark:block"
-        d="M24 32H8V16H24V32Z"
-        fill="#4B4646"
-      />
-      <path className="hidden dark:block" d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#F1ECEC" />
-    </g>
-    <defs>
-      <clipPath id="opencode__clip0_1311_94969">
-        <rect width="32" height="40" fill="white" />
-      </clipPath>
-    </defs>
-  </svg>
-);
-
 export const ACPRegistryIcon: Icon = ({ className, ...props }) => (
   <svg
     {...props}
@@ -747,21 +677,6 @@ export const ACPRegistryIcon: Icon = ({ className, ...props }) => (
     className={cn("fill-black dark:fill-white", className)}
   >
     <path d="M568.003 115.821L517.278 27.9661C507.183 10.4816 489.084 0.0227367 468.894 0.0227367C448.727 0.0227367 430.674 10.4361 420.556 27.8752L343.251 161.749H242.755C236.23 161.749 230.386 158.384 227.135 152.745C223.861 147.106 223.861 140.376 227.135 134.715L277.861 46.8603C281.112 41.2216 286.955 37.8338 293.481 37.8338C300.006 37.8338 305.827 41.1988 309.101 46.8603L312.125 52.0897C313.353 54.2042 315.604 55.5002 318.036 55.5002C320.469 55.5002 322.743 54.1815 323.948 52.067L337.385 28.5118C338.795 26.0335 338.522 22.9413 336.703 20.7586C325.699 7.57131 309.874 0 293.322 0C292.662 0 292.003 0 291.321 0.0454733C272.04 0.75031 254.76 11.1864 245.074 27.9434L200.215 105.657L155.81 29.1484C145.465 11.2092 126.594 0.0227367 106.608 0.0227367C105.949 0.0227367 105.289 0.0227367 104.607 0.06821C85.3265 0.773047 68.0467 11.2092 58.3608 27.9661L7.65806 115.821C-6.25678 139.899 -0.868187 168.82 21.05 187.759C29.8945 195.422 41.6039 199.628 54.0181 199.628H148.648C151.081 199.628 153.332 198.332 154.56 196.217L168.52 172.026C169.748 169.911 169.748 167.319 168.52 165.205C167.292 163.09 165.041 161.794 162.608 161.794H56.0417C49.5163 161.794 43.6729 158.429 40.4216 152.79C37.1475 147.152 37.1475 140.422 40.4216 134.76L91.1471 46.9057C94.3985 41.2671 100.242 37.8793 106.767 37.8793C113.293 37.8793 119.113 41.2443 122.387 46.9057L194.826 172.526C195.031 172.89 195.258 173.208 195.531 173.526C198.76 178.665 202.83 183.485 207.786 187.782C216.631 195.444 228.34 199.651 240.754 199.651H321.424L315.581 209.769C314.353 211.883 314.353 214.475 315.581 216.59C316.809 218.704 319.059 220 321.492 220H349.436C351.868 220 354.119 218.704 355.347 216.59L364.396 200.901L367.17 196.468C367.17 196.468 367.261 196.331 367.284 196.263L453.274 46.9285C456.525 41.2898 462.369 37.902 468.894 37.902C475.42 37.902 481.263 41.2671 484.514 46.9285L535.24 134.783C538.491 140.422 538.514 147.174 535.24 152.813C531.988 158.452 526.145 161.84 519.62 161.84H418.669C416.236 161.84 413.985 163.136 412.757 165.25L398.774 189.442C397.546 191.556 397.546 194.148 398.774 196.263C400.002 198.377 402.253 199.673 404.686 199.673H518.21C539.81 199.673 559.295 188.237 569.026 169.843C578.053 152.79 577.666 132.623 567.981 115.843L568.003 115.821Z" />
-  </svg>
-);
-
-export const PiAgentIcon: Icon = ({ className, ...props }) => (
-  <svg
-    {...props}
-    viewBox="165.29 165.29 469.43 469.43"
-    fill="none"
-    className={cn("fill-[#0F0F0F] dark:fill-[#F5F5F5]", className)}
-  >
-    <path
-      fillRule="evenodd"
-      d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
-    />
-    <path d="M517.36 400H634.72V634.72H517.36Z" />
   </svg>
 );
 
@@ -775,6 +690,14 @@ export const ForgejoIcon: Icon = (props) => (
       <circle cx="142" cy="88" r="18" stroke="#d40000" strokeWidth="15" />
       <circle cx="58" cy="180" r="18" stroke="#d40000" strokeWidth="15" />
     </g>
+  </svg>
+);
+
+// GitCafe's own mark, from https://git.cafe/favicon.svg, inset so the full-bleed square does not
+// read heavier than the round and cut-out marks beside it.
+export const GitCafeIcon: Icon = (props) => (
+  <svg viewBox="0 0 64 64" aria-hidden="true" {...props}>
+    <rect x="4.8" y="4.8" width="54.4" height="54.4" fill="#a78bfa" />
   </svg>
 );
 
@@ -862,3 +785,35 @@ export const ComputerUseAppIcon: Icon = (props) => {
     </svg>
   );
 };
+
+export const FreebuffIcon: Icon = ({ className, ...props }) => (
+  <svg {...props} viewBox="0 0 24 24" fill="none" className={cn("stroke-current", className)}>
+    <path d="M4 5.5h16v13H4z" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="m7 9 3 3-3 3m5 0h5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+// Cline's mark is a rounded square with a pin and two bars. It is painted with
+// explicit brand fills rather than `currentColor` so it stays legible against
+// any surface a caller tints it with.
+export const ClineIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 92 96"
+    className={cn(
+      "fill-[#0F0F0F] stroke-[#0F0F0F] dark:fill-[#F5F5F5] dark:stroke-[#F5F5F5]",
+      className,
+    )}
+  >
+    <g transform="translate(0 0.5)">
+      <path
+        stroke="none"
+        fillRule="nonzero"
+        d="M65.4492701,16.3 C76.3374701,16.3 85.1635558,25.16479 85.1635558,36.1 L85.1635558,42.7 L90.9027661,54.1647464 C91.4694141,55.2966923 91.4668177,56.6300535 90.8957658,57.7597839 L85.1635558,69.1 L85.1635558,75.7 C85.1635558,86.63554 76.3374701,95.5 65.4492701,95.5 L26.0206986,95.5 C15.1328272,95.5 6.30641291,86.63554 6.30641291,75.7 L6.30641291,69.1 L0.448507752,57.7954874 C-0.14693501,56.6464093 -0.149634367,55.2802504 0.441262896,54.1288283 L6.30641291,42.7 L6.30641291,36.1 C6.30641291,25.16479 15.1328272,16.3 26.0206986,16.3 L65.4492701,16.3 Z M62.9301895,22 L29.189529,22 C19.8723267,22 12.3191987,29.5552188 12.3191987,38.875 L12.3191987,44.5 L7.44288578,53.9634655 C6.84794449,55.1180686 6.85066096,56.4896598 7.45017099,57.6418974 L12.3191987,67 L12.3191987,72.625 C12.3191987,81.9450625 19.8723267,89.5 29.189529,89.5 L62.9301895,89.5 C72.2476729,89.5 79.8005198,81.9450625 79.8005198,72.625 L79.8005198,67 L84.5682187,57.6061395 C85.1432011,56.473244 85.1458141,55.1345713 84.5752587,53.9994398 L79.8005198,44.5 L79.8005198,38.875 C79.8005198,29.5552188 72.2476729,22 62.9301895,22 Z"
+      />
+      <circle cx="45.7349843" cy="11" r="11" stroke="none" />
+      <rect x="31" y="44.5" width="5" height="22" rx="2.5" strokeWidth="8" />
+      <rect x="55" y="44.5" width="5" height="22" rx="2.5" strokeWidth="8" />
+    </g>
+  </svg>
+);
