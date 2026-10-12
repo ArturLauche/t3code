@@ -1644,7 +1644,7 @@ export const createCodexAdapterV2 = (
     const clientFactory =
       cloudTransport === undefined
         ? sharedClientFactory
-        : yield* makeCloudCodexAppServerClientFactory(cloudTransport);
+        : yield* makeCodexAppServerClientFactory({ spawner: cloudTransport.spawner });
 
     return yield* makeCodexAdapterV2({
       instanceId,

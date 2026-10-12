@@ -357,7 +357,7 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
   }).pipe(
     // A cloud-sandboxed instance replaces the local spawner for every child
     // process this adapter starts, including the ACP session runtime.
-    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, options.childProcessSpawner),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
   );
 });
 

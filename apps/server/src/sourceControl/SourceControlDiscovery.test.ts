@@ -49,7 +49,19 @@ const layerSourceControlProviderRegistryTest = (input: {
         Layer.mock(BitbucketPullRequestApi.BitbucketPullRequestApi)({}),
         ServerSettings.ServerSettingsService.layerTest(),
         Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({}),
-        Layer.mock(GitHubApi.GitHubApi)({}),
+        // Discovery asks the API for the viewer only when a token exists. The
+        // mock answers without one, so the CLI-reported account stays
+        // authoritative and no token detail reaches the client.
+        Layer.mock(GitHubApi.GitHubApi)({
+          rest: () =>
+            Effect.succeed({
+              status: 200,
+              headers: { "content-type": "application/json" },
+              body: "{}",
+              truncated: false,
+              invalidUtf8: false,
+            }),
+        }),
         Layer.mock(GitVcsDriver.GitVcsDriver)({}),
         Layer.mock(GitLabCli.GitLabCli)({}),
         Layer.mock(GitLabPullRequestCli.GitLabPullRequestCli)({}),

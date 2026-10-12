@@ -7,9 +7,9 @@ import * as Option from "effect/Option";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { CloudProcess } from "./CloudProcess.ts";
+import { CloudProcess } from "@t3tools/cloud-runtime/CloudProcess";
 import { makeCloudRuntimeService } from "./CloudRuntimeServiceLive.ts";
-import type { CloudVendorAdapter } from "./VendorAdapter.ts";
+import type { CloudVendorAdapter } from "@t3tools/cloud-runtime/VendorAdapter";
 
 const runtimeId = CloudRuntimeId.make("primary");
 const environmentId = EnvironmentId.make("test-environment");

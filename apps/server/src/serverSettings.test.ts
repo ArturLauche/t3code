@@ -1226,18 +1226,18 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
-  it.effect("trims provider instance config settings when updates are applied", () =>
+  it.effect("keeps a provider instance config opaque at the settings layer", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
 
+      // The instance config blob is `Schema.Unknown` here; trimming and
+      // defaulting belong to each driver's own settings schema, which the
+      // registry applies when it materializes the instance.
       const next = yield* serverSettings.updateSettings({
         providerInstances: {
           [ProviderInstanceId.make("codex")]: {
             driver: ProviderDriverKind.make("codex"),
-            config: {
-              binaryPath: "  /opt/homebrew/bin/codex  ",
-              homePath: "   ",
-            },
+            config: { binaryPath: "  /opt/homebrew/bin/codex  ", homePath: "   " },
           },
           [ProviderInstanceId.make("claudeAgent")]: {
             driver: ProviderDriverKind.make("claudeAgent"),
@@ -1255,26 +1255,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
 
       assert.deepEqual(next.providerInstances[ProviderInstanceId.make("codex")]?.config, {
-        binaryPath: "/opt/homebrew/bin/codex",
-        homePath: "",
-        shadowHomePath: "",
-        launchArgs: "",
-        customModels: [],
+        binaryPath: "  /opt/homebrew/bin/codex  ",
+        homePath: "   ",
       });
       assert.deepEqual(next.providerInstances[ProviderInstanceId.make("claudeAgent")]?.config, {
-        binaryPath: "/opt/homebrew/bin/claude",
-        homePath: "",
-        customModels: [],
-        launchArgs: "",
-        autoCompactWindow: "",
+        binaryPath: "  /opt/homebrew/bin/claude  ",
       });
       assert.deepEqual(next.providerInstances[ProviderInstanceId.make("opencode")]?.config, {
-        // OpenCode is disabled by default; this update only touches paths.
-        binaryPath: "/opt/homebrew/bin/opencode",
-        serverUrl: "http://127.0.0.1:4096",
-        serverPassword: "secret-password",
-        customModels: [],
-        providers: {},
+        binaryPath: "  /opt/homebrew/bin/opencode  ",
+        serverUrl: "  http://127.0.0.1:4096  ",
+        serverPassword: "  secret-password  ",
       });
     }).pipe(Effect.provide(layerServerSettings())),
   );
@@ -1522,7 +1512,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.notInclude(raw, "sk-openai-secret");
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
       const persisted = JSON.parse(raw);
       assert.deepEqual(persisted.providerInstances.opencode.config.providers.openai, {
         apiKey: "",

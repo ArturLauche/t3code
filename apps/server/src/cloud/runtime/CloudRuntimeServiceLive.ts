@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - Setup-command hashing and credential
+// derivation are Node boundaries with no Effect equivalent.
 import * as NodeCrypto from "node:crypto";
 
 import {
@@ -30,6 +32,7 @@ import * as Schema from "effect/Schema";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { cloudRuntimeCredentialName } from "@t3tools/cloud-runtime/credentialName";
+import type { CloudExecutionPrepareInput } from "@t3tools/provider-core/server/cloudExecution";
 import { isManagedSandbox } from "./sandboxOwnership.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
@@ -629,7 +632,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
   });
 
   const prepareExecution = Effect.fn("CloudRuntimeService.prepareExecution")(function* (
-    input: import("./CloudRuntimeService.ts").CloudExecutionPrepareInput,
+    input: CloudExecutionPrepareInput,
   ) {
     const { config } = yield* requireConfig(input.runtimeId);
     const setupHash = NodeCrypto.createHash("sha256");

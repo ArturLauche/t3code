@@ -55,7 +55,7 @@ export interface CloudExecutionProcess extends NodeJS.EventEmitter {
   resize(cols: number, rows: number): void;
   complete(exitCode: number | null, signal?: string | null): void;
   asChildProcessHandle(): ChildProcessSpawner.ChildProcessHandle;
-  wait(): Promise<{ readonly exitCode: number | null; readonly signal: string | null }>;
+  wait(): Promise<{ readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }>;
 }
 
 /**

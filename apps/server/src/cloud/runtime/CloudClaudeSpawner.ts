@@ -3,19 +3,27 @@
  * Agent SDK's synchronous spawn hook.
  *
  * The SDK never asks a spawner for a handle; it calls `spawnClaudeCodeProcess`
- * and expects a `SpawnedProcess` synchronously. `DeferredCloudProcess` supplies
+ * and expects a `SpawnedProcess` synchronously. `DeferredCloudExecutionProcess` supplies
  * that shape while the remote start resolves asynchronously.
  *
  * @module cloud/runtime/CloudClaudeSpawner
  */
+// @effect-diagnostics nodeBuiltinImport:off - Bridges the Claude Agent SDK's
+// synchronous spawn hook to the cloud transport; both boundaries are Node streams.
 import * as NodeEvents from "node:events";
 import * as NodeStream from "node:stream";
 
 import type { SpawnOptions, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import * as ChildProcess from "effect/process/ChildProcess";
+import * as Effect from "effect/Effect";
+import * as PlatformError from "effect/PlatformError";
+import type * as Scope from "effect/Scope";
 
-import type { CloudSpawnNode } from "@t3tools/provider-core/server/cloudExecution";
-class DeferredCloudProcess extends NodeEvents.EventEmitter implements SpawnedProcess {
+import type {
+  CloudExecutionProcess,
+  CloudSpawnNode,
+} from "@t3tools/provider-core/server/cloudExecution";
+class DeferredCloudExecutionProcess extends NodeEvents.EventEmitter implements SpawnedProcess {
   readonly stdin = new NodeStream.PassThrough();
   readonly stdout = new NodeStream.PassThrough();
   readonly stderr = new NodeStream.PassThrough();
@@ -23,12 +31,14 @@ class DeferredCloudProcess extends NodeEvents.EventEmitter implements SpawnedPro
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
 
-  private remote: CloudProcess | undefined;
+  private remote: CloudExecutionProcess | undefined;
   private pendingInput: Array<Uint8Array> = [];
   private pendingInputClosed = false;
   private completed = false;
 
-  constructor(start: Effect.Effect<CloudProcess, PlatformError.PlatformError, Scope.Scope>) {
+  constructor(
+    start: Effect.Effect<CloudExecutionProcess, PlatformError.PlatformError, Scope.Scope>,
+  ) {
     super();
     this.on("error", () => undefined);
     this.stdin.on("data", (data: Buffer) => {
@@ -109,7 +119,7 @@ export const makeCloudClaudeSpawner =
       ...(options.cwd ? { cwd: options.cwd } : {}),
       env,
     });
-    const deferred = new DeferredCloudProcess(spawnNode(command));
+    const deferred = new DeferredCloudExecutionProcess(spawnNode(command));
     if (options.signal.aborted) deferred.kill("SIGTERM");
     else options.signal.addEventListener("abort", () => deferred.kill("SIGTERM"), { once: true });
     return deferred;

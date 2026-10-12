@@ -6,7 +6,7 @@ import {
   type ProviderInstanceId,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -19,9 +19,9 @@ import type * as AcpCompat from "effect-acp/compat";
 
 import type { CloudExecutionCwdResolver } from "@t3tools/provider-core/server/cloudExecution";
 import * as ServerConfig from "../../config.ts";
-import { acpPermissionDisposition } from "../../provider/acp/AcpClientPolicy.ts";
-import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
-import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
+import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
+import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   applyClineAcpModelSelection,
   CLINE_SUPPORTED_RUNTIME_MODES,
@@ -30,23 +30,25 @@ import {
   resolveClineActModeId,
   type ClineAcpRuntimeClineSettings,
 } from "../../provider/acp/ClineAcpSupport.ts";
-import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
+import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
-import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,
   type AcpAdapterV2Flavor,
   type AcpAdapterV2RuntimeInput,
-} from "./AcpAdapterV2.ts";
+} from "@t3tools/provider-acp/server/adapter";
 
 export const CLINE_PROVIDER = ProviderDriverKind.make("cline");
 const CLINE_DRIVER_KIND = CLINE_PROVIDER;
@@ -209,31 +211,33 @@ export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAd
   };
 }
 
-export function makeClineAdapterV2(
+export const makeClineAdapterV2 = Effect.fn("makeClineAdapterV2")(function* (
   options: ClineAdapterV2Options,
-): ProviderAdapter.ProviderAdapterV2Shape {
-  return makeAcpAdapterV2({
+) {
+  return yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
     flavor: makeClineAcpAdapterFlavor(options),
-    crypto: options.crypto,
-    fileSystem: options.fileSystem,
-    idAllocator: options.idAllocator,
-    serverConfig: options.serverConfig,
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
       ? {}
       : { continuationRequests: options.continuationRequests }),
-  });
-}
+  }).pipe(
+    // A cloud-sandboxed instance replaces the local spawner for every child
+    // process this adapter starts, including the ACP session runtime.
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, options.childProcessSpawner),
+  );
+});
 
 export type ClineAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
+  | ProviderHost.ProviderHost
   | ServerConfig.ServerConfig;
 
 export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAdapterV2DriverEnv> = {
@@ -242,7 +246,7 @@ export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAda
   defaultConfig: (): ClineSettings => DEFAULT_CLINE_SETTINGS,
   create: Effect.fn("ClineAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<ClineSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
       const localChildProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
@@ -252,10 +256,10 @@ export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAda
       const selfInvocation = yield* resolveSelfInvocation();
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-      return makeClineAdapterV2({
+      return yield* makeClineAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         crypto,
         fileSystem,
         idAllocator,
