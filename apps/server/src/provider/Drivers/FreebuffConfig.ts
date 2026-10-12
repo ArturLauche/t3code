@@ -3,7 +3,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { expandHomePathWith } from "../../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 export const resolveFreebuffConfigDir = Effect.fn("resolveFreebuffConfigDir")(function* (input: {
   readonly settings: FreebuffSettings;
@@ -11,9 +12,10 @@ export const resolveFreebuffConfigDir = Effect.fn("resolveFreebuffConfigDir")(fu
   readonly stateDir: string;
 }): Effect.fn.Return<string, never, Path.Path> {
   const path = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
   const configured = input.settings.configDir.trim();
   if (configured) {
-    const expanded = expandHomePathWith(configured, path);
+    const expanded = expandHomePath(configured, home);
     return path.isAbsolute(expanded) ? expanded : path.resolve(input.stateDir, expanded);
   }
   return path.join(input.stateDir, "freebuff", input.instanceId);

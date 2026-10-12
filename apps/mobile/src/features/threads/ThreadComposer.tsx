@@ -110,6 +110,7 @@ import {
   type ComposerSendPresentation,
 } from "./composerSendPresentation";
 import { ComposerCommandPopover } from "./ComposerCommandPopover";
+import { ComposerPopoverAnchor } from "./ComposerPopoverAnchor";
 import { ComposerQueuedEditAttachments } from "./ComposerQueuedEdit";
 import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
@@ -148,6 +149,7 @@ export const COMPOSER_COLLAPSED_CHROME = 60;
 export const COMPOSER_EXPANDED_CHROME = 156;
 
 export interface ThreadComposerProps {
+  readonly canOperateThread: boolean;
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerAttachment>;
   readonly placeholder: string;
@@ -567,6 +569,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     attachmentBlockReason ??
     providerCapabilitySendBlockReason?.reason;
   const canSend =
+    (props.canOperateThread || props.connectionState !== "connected") &&
     hasContent &&
     !contextImports[composerDraftKey] &&
     !voiceInput.blocksSubmission &&
@@ -799,7 +802,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         {!voiceInput.isBusy &&
         composerMenu.trigger &&
         (composerMenu.items.length > 0 || composerMenu.trigger.kind === "pull-request") ? (
-          <View className="absolute inset-x-0 bottom-full z-10 mb-2">
+          <ComposerPopoverAnchor>
             <ComposerCommandPopover
               items={composerMenu.items}
               triggerKind={composerMenu.trigger.kind}
@@ -807,7 +810,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               error={composerMenu.error}
               onSelect={composerMenu.onSelect}
             />
-          </View>
+          </ComposerPopoverAnchor>
         ) : null}
 
         {selectedProviderStatus?.compatibilityAdvisory?.message &&
@@ -1098,6 +1101,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     accessibilityLabel="Stop agent"
                     icon="stop.fill"
                     variant="danger"
+                    disabled={!props.canOperateThread}
                     onPress={props.onStopThread}
                   />
                 ) : (
@@ -1194,6 +1198,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       accessibilityLabel="Stop agent"
                       icon="stop.fill"
                       variant="danger"
+                      disabled={!props.canOperateThread}
                       onPress={props.onStopThread}
                     />
                   ) : voicePresentation.showsSend ? (
@@ -1209,6 +1214,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </ComposerDictationToolbar>
           </Animated.View>
         </ComposerSurface>
+
+        {props.connectionState === "connected" && !props.canOperateThread ? (
+          <Text className="pt-2 text-xs text-foreground-muted">
+            This connection cannot control this task. You can still edit your draft.
+          </Text>
+        ) : null}
       </Animated.View>
 
       <VideoPreviewModal source={previewVideo} onRequestClose={closePreview} />

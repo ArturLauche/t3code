@@ -27,9 +27,15 @@ import * as Stream from "effect/Stream";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { cloudRuntimeCredentialName, staleCloudCredentialIds } from "./credentialName.ts";
+import {
+  cloudRuntimeCredentialName,
+  staleCloudCredentialIds,
+} from "@t3tools/cloud-runtime/credentialName";
 import { isManagedSandbox } from "./sandboxOwnership.ts";
-import { makeCloudVendorAdapter, type CloudVendorAdapter } from "./VendorAdapter.ts";
+import {
+  makeCloudVendorAdapter,
+  type CloudVendorAdapter,
+} from "@t3tools/cloud-runtime/VendorAdapter";
 
 const decoder = new TextDecoder();
 
