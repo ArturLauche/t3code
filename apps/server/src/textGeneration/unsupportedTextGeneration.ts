@@ -20,7 +20,7 @@ const reject =
     Effect.fail(
       new TextGenerationError({
         operation,
-        detail: `${driverKind} does not support background text generation. Pick another provider for titles, branch names, commit messages and pull request descriptions.`,
+        detail: `${driverKind} does not support background text generation. Pick another provider for titles, branch names, commit messages, pull request descriptions and review guides.`,
       }),
     );
 
@@ -33,5 +33,6 @@ export const makeUnsupportedTextGeneration = (
     generatePrContent: () => fail("generatePrContent"),
     generateBranchName: () => fail("generateBranchName"),
     generateThreadTitle: () => fail("generateThreadTitle"),
+    generateReviewGuide: () => fail("generateReviewGuide"),
   };
 };
