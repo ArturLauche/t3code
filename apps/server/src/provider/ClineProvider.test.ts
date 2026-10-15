@@ -17,7 +17,7 @@ import { buildInitialClineProviderSnapshot, checkClineProviderStatus } from "./C
 
 const decodeClineSettings = Schema.decodeSync(ClineSettings);
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-const mockAgentPath = NodePath.resolve(__dirname, "../../../scripts/acp-mock-agent.ts");
+const mockAgentPath = NodePath.resolve(__dirname, "../../scripts/acp-mock-agent.ts");
 
 /**
  * A stand-in for the Cline CLI: `--version` prints a version and exits, and
