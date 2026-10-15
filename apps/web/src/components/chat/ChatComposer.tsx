@@ -3162,7 +3162,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const addComposerImage = (image: ComposerImageAttachment) =>
     addComposerDraftImages(attachmentDraftTarget, [image]);
 
-const addComposerImagesToDraft = (images: ComposerImageAttachment[]) => {
+  const addComposerImagesToDraft = (images: ComposerImageAttachment[]) => {
     // Reject at the door: a provider that drops non-text content would
     // otherwise accept the image and silently discard it on Send.
     const reason = getUnsupportedProviderAttachmentReason({

@@ -319,7 +319,7 @@ import {
   ChevronDownIcon,
   DownloadIcon,
   GitBranchIcon,
-ShieldAlertIcon,
+  ShieldAlertIcon,
   ShieldQuestionIcon,
   TargetIcon,
   WifiOffIcon,
