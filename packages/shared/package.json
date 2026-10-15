@@ -171,6 +171,10 @@
       "types": "./src/orchestrationTiming.ts",
       "import": "./src/orchestrationTiming.ts"
     },
+    "./generationTiming": {
+      "types": "./src/generationTiming.ts",
+      "import": "./src/generationTiming.ts"
+    },
     "./remote": {
       "types": "./src/remote.ts",
       "import": "./src/remote.ts"
