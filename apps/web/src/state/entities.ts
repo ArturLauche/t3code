@@ -20,6 +20,7 @@ import {
   allEnvironmentShellsBootstrappedAtom,
 } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import { latestProviderTurnTokenUsage } from "../lib/contextWindow";
 import { waitForAtomValue } from "./waitForAtomValue";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
@@ -196,6 +197,20 @@ export function waitForProject(
 
 export function readThreadShell(ref: ScopedThreadRef): EnvironmentThreadShell | null {
   return appAtomRegistry.get(environmentThreadShells.threadShellAtom(ref));
+}
+
+/** Newest provider-reported per-turn output-token count for a thread, read
+    outside React. The live TPS meter polls this on a timer instead of
+    subscribing, so streaming tokens cause no re-renders. Returns null when the
+    provider reports no output count yet (turn not generating, or an adapter
+    that does not stream usage). */
+export function readThreadOutputTokenUsage(ref: ScopedThreadRef): { outputTokens: number } | null {
+  const thread = appAtomRegistry.get(environmentThreadDetails.threadAtom(ref));
+  const providerTurns = thread?.projection.providerTurns;
+  if (providerTurns === undefined) return null;
+  const usage = latestProviderTurnTokenUsage(providerTurns);
+  if (usage === null || usage.outputTokens === undefined) return null;
+  return { outputTokens: usage.outputTokens };
 }
 
 export function waitForThreadShell(ref: ScopedThreadRef, timeoutMs = 5_000): Promise<boolean> {

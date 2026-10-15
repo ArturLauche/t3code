@@ -146,6 +146,7 @@ import {
   type ComposerTasksProgress,
 } from "./ComposerTasksBadge";
 import { ComposerActivityRow } from "./ComposerActivityStatus";
+import { ComposerStreamingTps } from "./ComposerStreamingTps";
 import {
   reconcileAttachmentContextReferences,
   type RetainedAttachmentContextPayloads,
@@ -1869,6 +1870,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const shownSyncPhase = useDelayedStatus(composerDraftTargetKey, props.threadSyncPhase);
   const activeTasksProgress = shownSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = shownSyncPhase === null ? props.activeTaskSteps : null;
+  // Live output tok/s for the active turn. Shown only while a turn is actually
+  // running and the thread detail is not doing a load/sync resync, since that
+  // resync owns the activity row instead.
+  const composerThreadRef = useMemo<ScopedThreadRef | null>(
+    () => (activeThreadId === null ? null : { environmentId, threadId: activeThreadId }),
+    [environmentId, activeThreadId],
+  );
+  const showStreamingTps =
+    phase === "running" && shownSyncPhase === null && activeThreadId !== null;
   const isEditingQueuedMessage = editingQueuedAttachments !== null;
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -6895,10 +6905,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             items={bannerStackItems}
             attachedAbove={props.queuedRunsControl}
           />
-          {!activityStackItem && (shownSyncPhase || inlineTasksBadge) ? (
+          {!activityStackItem && (shownSyncPhase || inlineTasksBadge || showStreamingTps) ? (
             <ComposerBanner.Attachment>
               <ComposerBanner.Root data-chat-composer-activity-strip="true">
                 {shownSyncPhase ? <ComposerActivityRow phase={shownSyncPhase} /> : inlineTasksBadge}
+                {showStreamingTps ? (
+                  <ComposerStreamingTps
+                    active={phase === "running"}
+                    threadRef={composerThreadRef}
+                  />
+                ) : null}
               </ComposerBanner.Root>
             </ComposerBanner.Attachment>
           ) : null}
