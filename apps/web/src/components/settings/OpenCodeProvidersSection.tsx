@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRightIcon, LockIcon, PencilIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type {
   OpenCodeProviderModelSetting,
   OpenCodeProviderSettingsMap,
@@ -420,12 +420,9 @@ export function OpenCodeProvidersSection({
   const [modelError, setModelError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
-  const discovered = useMemo(() => discoverOpenCodeProviders(models), [models]);
-  const configuredIds = useMemo(() => new Set(Object.keys(providers)), [providers]);
-  const unconfiguredDiscovered = useMemo(
-    () => discovered.filter((entry) => !configuredIds.has(entry.providerId)),
-    [configuredIds, discovered],
-  );
+  const discovered = discoverOpenCodeProviders(models);
+  const configuredIds = new Set(Object.keys(providers));
+  const unconfiguredDiscovered = discovered.filter((entry) => !configuredIds.has(entry.providerId));
   const validateEntry = openCodeProviderIssues;
 
   const normalizedFilter = filter.trim().toLowerCase();

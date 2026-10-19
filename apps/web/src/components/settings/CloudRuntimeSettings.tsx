@@ -8,9 +8,10 @@ import {
   type EnvironmentId,
 } from "@t3tools/contracts";
 import { PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -160,24 +161,16 @@ export function CloudRuntimeSettings({
   const [busyId, setBusyId] = useState<string | null>(null);
   const refreshGeneration = useRef(0);
 
-  useEffect(() => {
-    // Runtime ids are scoped to an environment; never carry credentials or
-    // health state across an environment switch.
-    setRuntimes([]);
-    setApiKeys({});
-    setApiUrlDrafts({});
-    setSetupCommandDrafts({});
-    setBusyId(null);
-  }, [environmentId]);
-
-  const refresh = useCallback(async () => {
+  // One identity across renders, so the mount effect below runs once per
+  // environment rather than whenever the command atom returns a new function.
+  const refresh = useStableCallback(async () => {
     const generation = refreshGeneration.current + 1;
     refreshGeneration.current = generation;
     const result = await listRuntimes({ environmentId, input: {} });
     if (generation === refreshGeneration.current && result._tag === "Success") {
       setRuntimes(result.value.runtimes);
     }
-  }, [environmentId, listRuntimes]);
+  });
 
   useEffect(() => {
     void refresh();
@@ -192,35 +185,29 @@ export function CloudRuntimeSettings({
    * Create action issued right after a blur would otherwise run against the
    * endpoint the user just replaced, because the two use different lanes.
    */
-  const updateRuntime = useCallback(
-    async (id: CloudRuntimeId, patch: RuntimeConfigPatch): Promise<boolean> => {
-      const current = configuredRuntimes[id];
-      if (!current) return false;
-      const result = await updateRuntimeSettings({
-        environmentId,
-        input: { patch: { cloudRuntimeInstances: { [id]: mergeRuntimeConfig(current, patch) } } },
-      });
-      return result._tag === "Success";
-    },
-    [configuredRuntimes, environmentId, updateRuntimeSettings],
-  );
+  async function updateRuntime(id: CloudRuntimeId, patch: RuntimeConfigPatch): Promise<boolean> {
+    const current = configuredRuntimes[id];
+    if (!current) return false;
+    const result = await updateRuntimeSettings({
+      environmentId,
+      input: { patch: { cloudRuntimeInstances: { [id]: mergeRuntimeConfig(current, patch) } } },
+    });
+    return result._tag === "Success";
+  }
   /** Drops a draft only once the value it held is what the server accepted. */
-  const discardDraft = useCallback(
-    (
-      setter: React.Dispatch<React.SetStateAction<Readonly<Record<string, string>>>>,
-      id: string,
-    ) => {
-      setter((current) => {
-        if (!(id in current)) return current;
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
-    },
-    [],
-  );
+  function discardDraft(
+    setter: React.Dispatch<React.SetStateAction<Readonly<Record<string, string>>>>,
+    id: string,
+  ): void {
+    setter((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
 
-  const addRuntime = useCallback(() => {
+  function addRuntime(): void {
     const id = newRuntimeId.trim();
     if (!isValidRuntimeId(id) || configuredRuntimes[id as CloudRuntimeId]) {
       return;
@@ -244,134 +231,122 @@ export function CloudRuntimeSettings({
       setNewRuntimeId("");
       void refresh();
     });
-  }, [configuredRuntimes, environmentId, newRuntimeId, refresh, updateRuntimeSettings]);
+  }
 
-  const removeRuntime = useCallback(
-    (runtime: CloudRuntimeInstance) => {
-      setBusyId(runtime.id);
-      void (async () => {
-        try {
-          // Clear first so a reconnecting client cannot observe a removed
-          // runtime with a still-live credential. The server also removes
-          // stale credentials transactionally when settings are patched.
-          await clearCredential({ environmentId, input: { runtimeId: runtime.id } });
-        } catch {
-          // Continue removing the configuration; the server-side settings
-          // transaction is the authoritative credential cleanup path.
-        } finally {
-          void updateRuntimeSettings({
-            environmentId,
-            input: { patch: { cloudRuntimeInstances: { [runtime.id]: null } } },
-          });
-          setApiKeys((current) => {
-            const copy = { ...current };
-            delete copy[runtime.id];
-            return copy;
-          });
-          // A re-added runtime must not inherit an endpoint or a setup-command
-          // draft from the one that was just removed.
-          discardDraft(setApiUrlDrafts, runtime.id);
-          discardDraft(setSetupCommandDrafts, runtime.id);
-          setBusyId(null);
-          void refresh();
-        }
-      })();
-    },
-    [clearCredential, discardDraft, environmentId, refresh, updateRuntimeSettings],
-  );
-
-  const runCredentialCommand = useCallback(
-    async (runtimeId: CloudRuntimeId, command: "set" | "clear" | "test") => {
-      setBusyId(runtimeId);
+  function removeRuntime(runtime: CloudRuntimeInstance): void {
+    setBusyId(runtime.id);
+    void (async () => {
       try {
-        const result =
-          command === "set"
-            ? await setCredential({
-                environmentId,
-                input: { runtimeId, apiKey: apiKeys[runtimeId]?.trim() ?? "" },
-              })
-            : command === "clear"
-              ? await clearCredential({ environmentId, input: { runtimeId } })
-              : await testRuntime({ environmentId, input: { runtimeId } });
-        if (result._tag === "Success") {
-          setRuntimes(result.value.runtimes);
-          if (command === "set") {
-            setApiKeys((current) => ({ ...current, [runtimeId]: "" }));
-          }
-        }
+        // Clear first so a reconnecting client cannot observe a removed
+        // runtime with a still-live credential. The server also removes
+        // stale credentials transactionally when settings are patched.
+        await clearCredential({ environmentId, input: { runtimeId: runtime.id } });
+      } catch {
+        // Continue removing the configuration; the server-side settings
+        // transaction is the authoritative credential cleanup path.
       } finally {
-        setBusyId((current) => (current === runtimeId ? null : current));
-      }
-    },
-    [apiKeys, clearCredential, environmentId, setCredential, testRuntime],
-  );
-
-  const runSandboxCommand = useCallback(
-    async (
-      runtime: CloudRuntimeInstance,
-      sandboxId: string,
-      action: "pause" | "resume" | "stop" | "delete",
-    ) => {
-      setBusyId(runtime.id);
-      try {
-        const result = await sandboxAction({
+        void updateRuntimeSettings({
           environmentId,
-          input: { runtimeId: runtime.id, sandboxId, action },
+          input: { patch: { cloudRuntimeInstances: { [runtime.id]: null } } },
         });
-        if (result._tag === "Success") {
-          setRuntimes((current) =>
-            current.map((entry) =>
-              entry.id === runtime.id ? { ...entry, sandboxes: result.value.sandboxes } : entry,
-            ),
-          );
-        }
-      } finally {
-        setBusyId((current) => (current === runtime.id ? null : current));
-      }
-    },
-    [environmentId, sandboxAction],
-  );
-
-  const refreshSandboxes = useCallback(
-    async (runtimeId: CloudRuntimeId) => {
-      setBusyId(runtimeId);
-      try {
-        const result = await listSandboxes({ environmentId, input: { runtimeId } });
-        if (result._tag === "Success") {
-          setRuntimes((current) =>
-            current.map((entry) =>
-              entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
-            ),
-          );
-        }
-      } finally {
-        setBusyId((current) => (current === runtimeId ? null : current));
-      }
-    },
-    [environmentId, listSandboxes],
-  );
-
-  const createRuntimeSandbox = useCallback(
-    async (runtimeId: CloudRuntimeId) => {
-      setBusyId(runtimeId);
-      try {
-        const result = await createSandbox({
-          environmentId,
-          input: { runtimeId, name: `t3-${runtimeId}` },
+        setApiKeys((current) => {
+          const copy = { ...current };
+          delete copy[runtime.id];
+          return copy;
         });
-        if (result._tag === "Success") {
-          setRuntimes((current) =>
-            current.map((entry) =>
-              entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
-            ),
-          );
-        }
-      } finally {
-        setBusyId((current) => (current === runtimeId ? null : current));
+        // A re-added runtime must not inherit an endpoint or a setup-command
+        // draft from the one that was just removed.
+        discardDraft(setApiUrlDrafts, runtime.id);
+        discardDraft(setSetupCommandDrafts, runtime.id);
+        setBusyId(null);
+        void refresh();
       }
-    },
-    [createSandbox, environmentId],
-  );
+    })();
+  }
+
+  async function runCredentialCommand(
+    runtimeId: CloudRuntimeId,
+    command: "set" | "clear" | "test",
+  ): Promise<void> {
+    setBusyId(runtimeId);
+    try {
+      const result =
+        command === "set"
+          ? await setCredential({
+              environmentId,
+              input: { runtimeId, apiKey: apiKeys[runtimeId]?.trim() ?? "" },
+            })
+          : command === "clear"
+            ? await clearCredential({ environmentId, input: { runtimeId } })
+            : await testRuntime({ environmentId, input: { runtimeId } });
+      if (result._tag === "Success") {
+        setRuntimes(result.value.runtimes);
+        if (command === "set") {
+          setApiKeys((current) => ({ ...current, [runtimeId]: "" }));
+        }
+      }
+    } finally {
+      setBusyId((current) => (current === runtimeId ? null : current));
+    }
+  }
+
+  async function runSandboxCommand(
+    runtime: CloudRuntimeInstance,
+    sandboxId: string,
+    action: "pause" | "resume" | "stop" | "delete",
+  ): Promise<void> {
+    setBusyId(runtime.id);
+    try {
+      const result = await sandboxAction({
+        environmentId,
+        input: { runtimeId: runtime.id, sandboxId, action },
+      });
+      if (result._tag === "Success") {
+        setRuntimes((current) =>
+          current.map((entry) =>
+            entry.id === runtime.id ? { ...entry, sandboxes: result.value.sandboxes } : entry,
+          ),
+        );
+      }
+    } finally {
+      setBusyId((current) => (current === runtime.id ? null : current));
+    }
+  }
+
+  async function refreshSandboxes(runtimeId: CloudRuntimeId): Promise<void> {
+    setBusyId(runtimeId);
+    try {
+      const result = await listSandboxes({ environmentId, input: { runtimeId } });
+      if (result._tag === "Success") {
+        setRuntimes((current) =>
+          current.map((entry) =>
+            entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
+          ),
+        );
+      }
+    } finally {
+      setBusyId((current) => (current === runtimeId ? null : current));
+    }
+  }
+
+  async function createRuntimeSandbox(runtimeId: CloudRuntimeId): Promise<void> {
+    setBusyId(runtimeId);
+    try {
+      const result = await createSandbox({
+        environmentId,
+        input: { runtimeId, name: `t3-${runtimeId}` },
+      });
+      if (result._tag === "Success") {
+        setRuntimes((current) =>
+          current.map((entry) =>
+            entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
+          ),
+        );
+      }
+    } finally {
+      setBusyId((current) => (current === runtimeId ? null : current));
+    }
+  }
 
   /**
    * Runs a vendor action only once the endpoint the user just typed is the one
@@ -379,55 +354,51 @@ export function CloudRuntimeSettings({
    * blur would probe the previous endpoint and report its result as if it were
    * the new one.
    */
-  const withCommittedDrafts = useCallback(
-    async (id: CloudRuntimeId, action: () => Promise<void>) => {
-      const draft = apiUrlDrafts[id];
-      if (draft !== undefined && isValidCloudApiUrl(draft)) {
-        const committed = await updateRuntime(id, { apiUrl: draft });
-        if (!committed) return;
-        discardDraft(setApiUrlDrafts, id);
-      }
-      await action();
-    },
-    [apiUrlDrafts, discardDraft, updateRuntime],
-  );
+  async function withCommittedDrafts(
+    id: CloudRuntimeId,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    const draft = apiUrlDrafts[id];
+    if (draft !== undefined && isValidCloudApiUrl(draft)) {
+      const committed = await updateRuntime(id, { apiUrl: draft });
+      if (!committed) return;
+      discardDraft(setApiUrlDrafts, id);
+    }
+    await action();
+  }
 
-  const visibleRuntimes = useMemo(
-    () =>
-      Object.entries(configuredRuntimes).map(([runtimeId, config]) => {
-        const listed = runtimes.find((runtime) => runtime.id === runtimeId);
-        if (listed) {
-          const connectionChanged =
-            runtimeConnectionFingerprint(listed.config) !== runtimeConnectionFingerprint(config);
-          return {
-            ...listed,
-            config,
-            ...(connectionChanged
-              ? {
-                  sandboxes: [],
-                  health: {
-                    status: config.enabled ? "checking" : "disabled",
-                    message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
-                    checkedAt: new Date().toISOString(),
-                  },
-                }
-              : {}),
-          } satisfies CloudRuntimeInstance;
-        }
-        return {
-          id: CloudRuntimeId.make(runtimeId),
-          config,
-          hasCredential: false,
-          health: {
-            status: config.enabled ? "checking" : "disabled",
-            message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
-            checkedAt: new Date().toISOString(),
-          },
-          sandboxes: [],
-        } satisfies CloudRuntimeInstance;
-      }),
-    [configuredRuntimes, runtimes],
-  );
+  const visibleRuntimes = Object.entries(configuredRuntimes).map(([runtimeId, config]) => {
+    const listed = runtimes.find((runtime) => runtime.id === runtimeId);
+    if (listed) {
+      const connectionChanged =
+        runtimeConnectionFingerprint(listed.config) !== runtimeConnectionFingerprint(config);
+      return {
+        ...listed,
+        config,
+        ...(connectionChanged
+          ? {
+              sandboxes: [],
+              health: {
+                status: config.enabled ? "checking" : "disabled",
+                message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+                checkedAt: new Date().toISOString(),
+              },
+            }
+          : {}),
+      } satisfies CloudRuntimeInstance;
+    }
+    return {
+      id: CloudRuntimeId.make(runtimeId),
+      config,
+      hasCredential: false,
+      health: {
+        status: config.enabled ? "checking" : "disabled",
+        message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+        checkedAt: new Date().toISOString(),
+      },
+      sandboxes: [],
+    } satisfies CloudRuntimeInstance;
+  });
 
   return (
     <SettingsSection

@@ -148,10 +148,6 @@ export const makeClineAcpRuntime = Effect.fn("makeClineAcpRuntime")(function* (
   return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(Effect.provide(context));
 });
 
-/* -------------------------------------------------------------------------- */
-/* Model catalog                                                              */
-/* -------------------------------------------------------------------------- */
-
 type ClineSessionSetupResult =
   | AcpCompat.LoadSessionResponse
   | AcpCompat.NewSessionResponse
@@ -308,10 +304,6 @@ export const applyClineAcpModelSelection = Effect.fn("applyClineAcpModelSelectio
   },
 );
 
-/* -------------------------------------------------------------------------- */
-/* Session modes                                                              */
-/* -------------------------------------------------------------------------- */
-
 const CLINE_PLAN_MODE_ALIASES: ReadonlySet<string> = new Set(["plan", "architect"]);
 const CLINE_ACT_MODE_ALIASES: ReadonlyArray<string> = [
   "act",
@@ -364,10 +356,6 @@ export function resolveClineActModeId(
   return modeState.currentModeId;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Permissions                                                                */
-/* -------------------------------------------------------------------------- */
-
 /**
  * Access modes Cline can actually enforce. `auto-accept-edits` and `auto` both
  * promise a middle ground — approve some tool classes, ask about others — and
@@ -382,10 +370,6 @@ export const CLINE_SUPPORTED_RUNTIME_MODES: ReadonlyArray<RuntimeMode> = [
 export function clineSupportsRuntimeMode(runtimeMode: RuntimeMode): boolean {
   return CLINE_SUPPORTED_RUNTIME_MODES.includes(runtimeMode);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Authentication state                                                        */
-/* -------------------------------------------------------------------------- */
 
 const CLINE_SESSION_SETUP_METHODS: ReadonlySet<string> = new Set([
   "session/new",
