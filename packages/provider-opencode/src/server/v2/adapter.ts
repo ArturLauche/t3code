@@ -1049,6 +1049,40 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       });
     };
 
+    /**
+     * The context a turn has filled so far, read from the last step OpenCode
+     * reported. The meter needs it while the turn runs: a turn that ends after
+     * minutes of work would otherwise leave the window empty until it is over.
+     */
+    const emitContextUsage = Effect.fnUntraced(function* (state: ThreadState, turn: ActiveTurn) {
+      const lastStep = turn.lastStep;
+      if (lastStep === undefined) return;
+      const window = windowOf(turn.input.runtimePolicy.cwd, turn.input.modelSelection.model);
+      const tokenUsage = {
+        usedTokens: lastStep.input + lastStep.cache.read + lastStep.cache.write + lastStep.output,
+        maxTokens: window ?? null,
+        inputTokens: lastStep.input + lastStep.cache.read + lastStep.cache.write,
+        cachedInputTokens: lastStep.cache.read,
+        outputTokens: lastStep.output,
+        reasoningOutputTokens: lastStep.reasoning,
+        updatedAt: DateTime.formatIso(yield* DateTime.now),
+      };
+      const previous = turn.providerTurn.tokenUsage;
+      if (
+        previous !== undefined &&
+        previous.usedTokens === tokenUsage.usedTokens &&
+        previous.maxTokens === tokenUsage.maxTokens &&
+        previous.inputTokens === tokenUsage.inputTokens &&
+        previous.cachedInputTokens === tokenUsage.cachedInputTokens &&
+        previous.outputTokens === tokenUsage.outputTokens &&
+        previous.reasoningOutputTokens === tokenUsage.reasoningOutputTokens
+      ) {
+        return;
+      }
+      turn.providerTurn = { ...turn.providerTurn, tokenUsage };
+      yield* emitProviderTurn(state, turn, turn.providerTurn);
+    });
+
     const makeTurn = (
       owner: TurnOwner,
       providerTurn: OrchestrationV2ProviderTurn,
@@ -1588,7 +1622,30 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       // A spawned server lists its models lazily, so a window still unknown is
       // read again for the next turn, off this stream so it never delays one.
       if (window === undefined) {
-        yield* Effect.forkIn(readModels(directoryOf(turn.input.runtimePolicy.cwd)), sessionScope);
+        yield* Effect.forkIn(
+          readModels(directoryOf(turn.input.runtimePolicy.cwd)).pipe(
+            Effect.flatMap(() => {
+              const known = windowOf(turn.input.runtimePolicy.cwd, turn.input.modelSelection.model);
+              const emitted = state.providerTurns.get(String(turn.providerTurn.id));
+              const tokenUsage = emitted?.tokenUsage;
+              if (
+                known === undefined ||
+                emitted === undefined ||
+                tokenUsage === undefined ||
+                tokenUsage.maxTokens === known
+              ) {
+                return Effect.void;
+              }
+              // The turn is over, but the reading it left behind is worth the
+              // window the catalog finally named.
+              return emitProviderTurn(state, turn, {
+                ...emitted,
+                tokenUsage: { ...tokenUsage, maxTokens: known },
+              });
+            }),
+          ),
+          sessionScope,
+        );
       }
     });
 
@@ -2055,7 +2112,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           turn.usage.cacheWrite += tokens.cache.write;
           turn.usage.output += tokens.output + tokens.reasoning;
           turn.usage.reasoning += tokens.reasoning;
-          return;
+          return yield* emitContextUsage(state, turn);
         }
         case "session.execution.started":
           turn.heldEnd = undefined;

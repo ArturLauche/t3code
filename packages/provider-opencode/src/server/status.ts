@@ -33,6 +33,9 @@ import * as OpenCodeServerOwner from "./OpenCodeServerOwner.ts";
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
   showInteractionModeToggle: false,
+  // OpenCode reports the context of a turn as it runs, so the composer can
+  // reserve the meter's room before the first reading lands.
+  reportsContextWindow: true,
 } as const;
 
 class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{

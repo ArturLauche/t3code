@@ -3417,6 +3417,44 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reports the context window while an OpenCode 2 turn is still running", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.step.ended", {
+          sessionID: SESSION,
+          assistantMessageID: "msg_0eb735d5b001oAFVeY5jz3WD4Z",
+          finish: "stop",
+          cost: 0,
+          tokens: { input: 1200, output: 40, reasoning: 0, cache: { read: 300, write: 2500 } },
+        }),
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const readings = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* runtime.startTurn(turnInput(thread));
+      const events = yield* Fiber.join(readings);
+      const live = events.find(
+        (event) =>
+          event.type === "provider_turn.updated" &&
+          event.providerTurn.completedAt === null &&
+          event.providerTurn.tokenUsage !== undefined,
+      );
+      assert.isDefined(live);
+      const usage =
+        live?.type === "provider_turn.updated" ? live.providerTurn.tokenUsage : undefined;
+      assert.equal(usage?.usedTokens, 1200 + 300 + 2500 + 40);
+      assert.equal(usage?.maxTokens, 160000);
+      assert.equal(usage?.inputTokens, 1200 + 300 + 2500);
+      assert.equal(usage?.cachedInputTokens, 300);
+      assert.equal(usage?.outputTokens, 40);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("reports each directory's own limit for a model its project config changed", () =>
     Effect.gen(function* () {
       const custom = "/work/opencode2-custom";
