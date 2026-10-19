@@ -293,11 +293,16 @@ interface OpenCodeContextSnapshot {
   readonly tokens: OpenCodeContextTokens;
 }
 
-function tokenCount(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+/** A counter the server left out, or reported as nothing, counts as nothing. */
+function openCodeTokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
 
-/** Older servers send assistant messages without tokens, and a fresh one reports zeroes. */
+/**
+ * Older servers send assistant messages without tokens, and a server that
+ * leaves a counter out still reports the rest of the context. A counter that is
+ * missing counts as nothing, the way the usage reader counts it.
+ */
 function readOpenCodeContextTokens(message: OpenCodeMessage): OpenCodeContextTokens | null {
   if (!("tokens" in message)) return null;
   const raw: unknown = message.tokens;
@@ -307,33 +312,31 @@ function readOpenCodeContextTokens(message: OpenCodeMessage): OpenCodeContextTok
     typeof record.cache === "object" && record.cache !== null
       ? (record.cache as Record<string, unknown>)
       : {};
-  const input = tokenCount(record.input);
-  const output = tokenCount(record.output);
-  const reasoning = tokenCount(record.reasoning);
-  const cacheRead = tokenCount(cache.read);
-  const cacheWrite = tokenCount(cache.write);
-  if (
-    input === null ||
-    output === null ||
-    reasoning === null ||
-    cacheRead === null ||
-    cacheWrite === null
-  ) {
-    return null;
-  }
-  return { input, output, reasoning, cacheRead, cacheWrite };
+  return {
+    input: openCodeTokenCount(record.input),
+    output: openCodeTokenCount(record.output),
+    reasoning: openCodeTokenCount(record.reasoning),
+    cacheRead: openCodeTokenCount(cache.read),
+    cacheWrite: openCodeTokenCount(cache.write),
+  };
+}
+
+function openCodeContextTokensTotal(tokens: OpenCodeContextTokens): number {
+  return tokens.input + tokens.output + tokens.reasoning + tokens.cacheRead + tokens.cacheWrite;
 }
 
 function openCodeContextSnapshot(
   message: Extract<OpenCodeMessage, { readonly role: "assistant" }>,
   tokens: OpenCodeContextTokens,
 ): OpenCodeContextSnapshot | null {
-  if (message.providerID.length === 0 || message.modelID.length === 0) return null;
+  const providerID = typeof message.providerID === "string" ? message.providerID : "";
+  const modelID = typeof message.modelID === "string" ? message.modelID : "";
+  if (providerID.length === 0 || modelID.length === 0) return null;
   return {
     messageId: message.id,
     createdAt: message.time.created,
-    providerID: message.providerID,
-    modelID: message.modelID,
+    providerID,
+    modelID,
     tokens,
   };
 }
@@ -351,7 +354,11 @@ function sameOpenCodeContextTokens(
   );
 }
 
-/** A replayed or reordered event must not replace a newer reading with an older one. */
+/**
+ * A replayed or reordered event must not replace a newer reading with an older
+ * one. OpenCode's message ids carry their creation time and a per-millisecond
+ * counter, so comparing them orders two messages of the same millisecond.
+ */
 function isNewerOpenCodeContextSnapshot(
   previous: OpenCodeContextSnapshot | null,
   next: OpenCodeContextSnapshot,
@@ -400,6 +407,11 @@ function sameOpenCodeContextUsage(
  * Context windows by `providerID/modelID`, read from OpenCode's provider list.
  * A model id can carry slashes of its own, so the pair is joined the way
  * OpenCode names it: the provider first, then the model.
+ *
+ * The provider list keys its models by the id the configuration gave them,
+ * while OpenCode reports the model's own id on the messages it answers with,
+ * and T3 configures models under a name of its own. The window is therefore
+ * stored under both, so a lookup by either name finds it.
  */
 function readOpenCodeContextWindows(value: unknown): Map<string, number> {
   const windows = new Map<string, number>();
@@ -416,14 +428,18 @@ function readOpenCodeContextWindows(value: unknown): Map<string, number> {
     ) {
       continue;
     }
-    for (const [modelId, model] of Object.entries(record.models)) {
+    for (const [configuredId, model] of Object.entries(record.models)) {
       if (typeof model !== "object" || model === null) continue;
       const limit = (model as { readonly limit?: unknown }).limit;
       if (typeof limit !== "object" || limit === null) continue;
       const context = (limit as { readonly context?: unknown }).context;
-      const size = tokenCount(context);
-      if (size === null || size === 0) continue;
-      windows.set(`${record.id}/${modelId}`, size);
+      const size = openCodeTokenCount(context);
+      if (size === 0) continue;
+      const modelId = (model as { readonly id?: unknown }).id;
+      if (typeof modelId === "string" && modelId.length > 0) {
+        windows.set(`${record.id}/${modelId}`, size);
+      }
+      windows.set(`${record.id}/${configuredId}`, size);
     }
   }
   return windows;
@@ -464,6 +480,8 @@ interface ActiveOpenCodeTurn {
   idleDuringAdmission: boolean;
   admissionSettled: Deferred.Deferred<void>;
   admissionAbortController: AbortController | null;
+  /** A turn asks the catalog for a missing window once, not once per message. */
+  contextWindowsRequested: boolean;
 }
 
 type OpenCodeAdmissionSignal =
@@ -1219,7 +1237,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
          */
         const contextWindows = new Map<string, number>();
         let pendingContextWindows: Deferred.Deferred<void> | null = null;
-        let contextWindowsReadable = false;
+        let contextWindowsUnreachable = false;
         const readContextWindows = Effect.fnUntraced(function* () {
           const pending = pendingContextWindows;
           if (pending !== null) {
@@ -1237,14 +1255,17 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 for (const [key, window] of readOpenCodeContextWindows(response.data)) {
                   contextWindows.set(key, window);
                 }
-                contextWindowsReadable = true;
+                contextWindowsUnreachable = false;
               }),
             ),
+            // A timeout says nothing about the server, so the catalog stays
+            // reachable and a later read can still name the model.
+            Effect.catchTags({ TimeoutError: () => Effect.void }),
             Effect.catch(() =>
               Effect.sync(() => {
                 // A server that cannot list its providers will not name a
-                // model on the next ask either, so nothing waits for it twice.
-                contextWindowsReadable = false;
+                // model on the next ask either, so nothing asks it twice.
+                contextWindowsUnreachable = true;
               }),
             ),
             Effect.ensuring(
@@ -1418,15 +1439,31 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           if (turn.finalized) return;
           const key = `${snapshot.providerID}/${snapshot.modelID}`;
           const maxTokens = contextWindows.get(key);
-          if (maxTokens === undefined && contextWindowsReadable) {
+          if (
+            maxTokens === undefined &&
+            !contextWindowsUnreachable &&
+            !turn.contextWindowsRequested
+          ) {
             // A model the provider list has not named yet gets one bounded
-            // read, off the event stream so a slow catalog never delays the
-            // reply. The reading lands without a denominator until it does.
+            // read per turn, off the event stream so a slow catalog never
+            // delays the reply. The reading lands without a denominator until
+            // it does.
+            turn.contextWindowsRequested = true;
             yield* Effect.forkIn(
               readContextWindows().pipe(
-                Effect.flatMap(() =>
-                  publishContextUsage(state, turn, snapshot, contextWindows.get(key)),
-                ),
+                Effect.flatMap(() => {
+                  // The newest reading answers the question, not the one that
+                  // asked for it: a message that arrived meanwhile is the one
+                  // the meter has to show.
+                  const current = turn.usage.context;
+                  if (current === null) return Effect.void;
+                  return publishContextUsage(
+                    state,
+                    turn,
+                    current,
+                    contextWindows.get(`${current.providerID}/${current.modelID}`),
+                  );
+                }),
               ),
               scope,
             );
@@ -2297,14 +2334,11 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           }
           const context = turn.usage.context;
           if (context !== null) {
-            const key = `${context.providerID}/${context.modelID}`;
-            if (!contextWindows.has(key) && contextWindowsReadable) {
-              // The provider list can name a model the turn used late, so the
-              // final reading waits for one bounded read rather than shipping
-              // without the window the meter needs.
-              yield* readContextWindows();
-            }
-            const maxTokens = contextWindows.get(key);
+            // The window the catalog names can land after the last message of
+            // the turn, so the reading takes the one that is known now. The
+            // turn does not wait for the catalog: a read that would delay the
+            // terminal is left to the next turn.
+            const maxTokens = contextWindows.get(`${context.providerID}/${context.modelID}`);
             const tokenUsage = turn.providerTurn.tokenUsage;
             if (
               maxTokens !== undefined &&
@@ -2523,6 +2557,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             idleDuringAdmission: false,
             admissionSettled: Deferred.makeUnsafe<void>(),
             admissionAbortController: null,
+            contextWindowsRequested: false,
           };
           state.activeTurn = turn;
           state.providerTurns.set(String(providerTurnId), providerTurn);
@@ -2656,7 +2691,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           state.messageRoles.set(message.id, message.role);
           if (message.role === "assistant") {
             const turn = state.activeTurn;
-            if (turn === null || turn === undefined) return;
+            if (turn === null) return;
             const usage = turn.usage;
             const prior = usage.assistantOwnershipByMessageId.get(message.id);
             const ownership =
@@ -2679,7 +2714,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             }
             if (ownership === "owned") {
               const tokens = readOpenCodeContextTokens(message);
-              const snapshot = tokens === null ? null : openCodeContextSnapshot(message, tokens);
+              // A message that has not finished a step yet reports zeroes, and
+              // there is no context to show for it.
+              if (tokens === null || openCodeContextTokensTotal(tokens) === 0) return;
+              const snapshot = openCodeContextSnapshot(message, tokens);
               if (snapshot !== null && isNewerOpenCodeContextSnapshot(usage.context, snapshot)) {
                 usage.context = snapshot;
                 yield* emitContextUsage(state, turn, snapshot);
@@ -2966,11 +3004,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
 
         const inputProviderSessionId = input.providerSessionId;
 
-        // The provider list names every model's context window, and a turn
-        // needs one before it can report how full the context is. The read is
-        // bounded, so a slow catalog never holds the session for long.
-        yield* readContextWindows();
-
         const subscription = yield* sdkCall("event.subscribe", {}, () =>
           client.event.subscribe(undefined, { signal: abortController.signal }),
         );
@@ -3013,6 +3046,12 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           ),
           Effect.forkIn(scope),
         );
+
+        // The provider list names every model's context window, and the
+        // handoff budget of the first turn measures against it, so the catalog
+        // is read before the session opens. The read is bounded, and it runs
+        // after the subscription, so a slow catalog never misses an event.
+        yield* readContextWindows();
 
         if (!connection.external && connection.exitCode !== null) {
           yield* connection.exitCode.pipe(
@@ -3468,6 +3507,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 idleDuringAdmission: false,
                 admissionSettled: Deferred.makeUnsafe<void>(),
                 admissionAbortController: new AbortController(),
+                contextWindowsRequested: false,
               };
               if (turn.admissionMessageId !== null)
                 turn.usage.promptMessageIds.add(turn.admissionMessageId);
