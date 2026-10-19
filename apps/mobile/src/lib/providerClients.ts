@@ -72,7 +72,6 @@ const providerClients = makeProviderClientRegistry([
   acpRegistryClient,
 ]);
 
-/** The client definition for a driver kind, or `undefined` for drivers drawn by hand. */
 export function getProviderClient(driver: string | null | undefined) {
   return isProviderDriverKind(driver) ? providerClients.get(driver) : undefined;
 }

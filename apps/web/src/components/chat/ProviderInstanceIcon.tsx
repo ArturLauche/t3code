@@ -31,7 +31,6 @@ const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string
   [ProviderDriverKind.make("antigravity")]: "text-[#5b87bf]",
 };
 
-/** Brand text color for a provider label; package glyphs supply theirs as CSS variables. */
 export function providerTextColor(driverKind: ProviderDriverKind): {
   readonly className?: string;
   readonly style?: CSSProperties;
@@ -78,7 +77,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   statusDotClassName?: string;
   indicatorBackground?: string;
 }) {
-  const Icon = providerIconForDriverKind(props.driverKind);
+  // A plain map lookup, not `providerIconForDriverKind(...)`: the React Compiler
+  // reads a call result used as a component type as one created during render.
+  const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const packageIcon = providerClients.get(props.driverKind)?.icon;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
@@ -103,8 +104,6 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     >
       {isAcpRegistry ? (
         <AcpRegistryAgentIcon
-          // The search-tile radius would crop most of the glyph at these
-          // inline sizes.
           className={cn("size-5 rounded-none bg-transparent", props.iconClassName)}
           fallbackClassName="size-full"
           icon={acpRegistryIconUrl}
