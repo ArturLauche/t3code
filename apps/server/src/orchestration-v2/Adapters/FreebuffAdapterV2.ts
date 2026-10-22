@@ -72,7 +72,7 @@ const ESC = "\u001b";
  * conversation snapshot is available, and a screen carries no tool or subagent
  * structure — only the assistant's rendered text.
  */
-export const FreebuffProviderCapabilitiesV2 = {
+const FreebuffProviderCapabilitiesV2 = {
   sessions: {
     supportsMultipleProviderThreadsPerSession: false,
     supportsModelSwitchInSession: false,

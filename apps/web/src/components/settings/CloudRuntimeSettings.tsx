@@ -244,23 +244,22 @@ export function CloudRuntimeSettings({
       } catch {
         // Continue removing the configuration; the server-side settings
         // transaction is the authoritative credential cleanup path.
-      } finally {
-        void updateRuntimeSettings({
-          environmentId,
-          input: { patch: { cloudRuntimeInstances: { [runtime.id]: null } } },
-        });
-        setApiKeys((current) => {
-          const copy = { ...current };
-          delete copy[runtime.id];
-          return copy;
-        });
-        // A re-added runtime must not inherit an endpoint or a setup-command
-        // draft from the one that was just removed.
-        discardDraft(setApiUrlDrafts, runtime.id);
-        discardDraft(setSetupCommandDrafts, runtime.id);
-        setBusyId(null);
-        void refresh();
       }
+      void updateRuntimeSettings({
+        environmentId,
+        input: { patch: { cloudRuntimeInstances: { [runtime.id]: null } } },
+      });
+      setApiKeys((current) => {
+        const copy = { ...current };
+        delete copy[runtime.id];
+        return copy;
+      });
+      // A re-added runtime must not inherit an endpoint or a setup-command
+      // draft from the one that was just removed.
+      discardDraft(setApiUrlDrafts, runtime.id);
+      discardDraft(setSetupCommandDrafts, runtime.id);
+      setBusyId(null);
+      void refresh();
     })();
   }
 
@@ -269,24 +268,23 @@ export function CloudRuntimeSettings({
     command: "set" | "clear" | "test",
   ): Promise<void> {
     setBusyId(runtimeId);
-    try {
-      const result =
-        command === "set"
-          ? await setCredential({
-              environmentId,
-              input: { runtimeId, apiKey: apiKeys[runtimeId]?.trim() ?? "" },
-            })
-          : command === "clear"
-            ? await clearCredential({ environmentId, input: { runtimeId } })
-            : await testRuntime({ environmentId, input: { runtimeId } });
-      if (result._tag === "Success") {
-        setRuntimes(result.value.runtimes);
-        if (command === "set") {
-          setApiKeys((current) => ({ ...current, [runtimeId]: "" }));
-        }
-      }
-    } finally {
+    const result = await (
+      command === "set"
+        ? setCredential({
+            environmentId,
+            input: { runtimeId, apiKey: apiKeys[runtimeId]?.trim() ?? "" },
+          })
+        : command === "clear"
+          ? clearCredential({ environmentId, input: { runtimeId } })
+          : testRuntime({ environmentId, input: { runtimeId } })
+    ).finally(() => {
       setBusyId((current) => (current === runtimeId ? null : current));
+    });
+    if (result._tag === "Success") {
+      setRuntimes(result.value.runtimes);
+      if (command === "set") {
+        setApiKeys((current) => ({ ...current, [runtimeId]: "" }));
+      }
     }
   }
 
@@ -296,55 +294,49 @@ export function CloudRuntimeSettings({
     action: "pause" | "resume" | "stop" | "delete",
   ): Promise<void> {
     setBusyId(runtime.id);
-    try {
-      const result = await sandboxAction({
-        environmentId,
-        input: { runtimeId: runtime.id, sandboxId, action },
-      });
-      if (result._tag === "Success") {
-        setRuntimes((current) =>
-          current.map((entry) =>
-            entry.id === runtime.id ? { ...entry, sandboxes: result.value.sandboxes } : entry,
-          ),
-        );
-      }
-    } finally {
+    const result = await sandboxAction({
+      environmentId,
+      input: { runtimeId: runtime.id, sandboxId, action },
+    }).finally(() => {
       setBusyId((current) => (current === runtime.id ? null : current));
+    });
+    if (result._tag === "Success") {
+      setRuntimes((current) =>
+        current.map((entry) =>
+          entry.id === runtime.id ? { ...entry, sandboxes: result.value.sandboxes } : entry,
+        ),
+      );
     }
   }
 
   async function refreshSandboxes(runtimeId: CloudRuntimeId): Promise<void> {
     setBusyId(runtimeId);
-    try {
-      const result = await listSandboxes({ environmentId, input: { runtimeId } });
-      if (result._tag === "Success") {
-        setRuntimes((current) =>
-          current.map((entry) =>
-            entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
-          ),
-        );
-      }
-    } finally {
+    const result = await listSandboxes({ environmentId, input: { runtimeId } }).finally(() => {
       setBusyId((current) => (current === runtimeId ? null : current));
+    });
+    if (result._tag === "Success") {
+      setRuntimes((current) =>
+        current.map((entry) =>
+          entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
+        ),
+      );
     }
   }
 
   async function createRuntimeSandbox(runtimeId: CloudRuntimeId): Promise<void> {
     setBusyId(runtimeId);
-    try {
-      const result = await createSandbox({
-        environmentId,
-        input: { runtimeId, name: `t3-${runtimeId}` },
-      });
-      if (result._tag === "Success") {
-        setRuntimes((current) =>
-          current.map((entry) =>
-            entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
-          ),
-        );
-      }
-    } finally {
+    const result = await createSandbox({
+      environmentId,
+      input: { runtimeId, name: `t3-${runtimeId}` },
+    }).finally(() => {
       setBusyId((current) => (current === runtimeId ? null : current));
+    });
+    if (result._tag === "Success") {
+      setRuntimes((current) =>
+        current.map((entry) =>
+          entry.id === runtimeId ? { ...entry, sandboxes: result.value.sandboxes } : entry,
+        ),
+      );
     }
   }
 

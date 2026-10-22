@@ -24,7 +24,6 @@ import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeL
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   applyClineAcpModelSelection,
-  CLINE_SUPPORTED_RUNTIME_MODES,
   clineSupportsRuntimeMode,
   makeClineAcpRuntime,
   resolveClineActModeId,
@@ -50,7 +49,7 @@ import {
   type AcpAdapterV2RuntimeInput,
 } from "@t3tools/provider-acp/server/adapter";
 
-export const CLINE_PROVIDER = ProviderDriverKind.make("cline");
+const CLINE_PROVIDER = ProviderDriverKind.make("cline");
 const CLINE_DRIVER_KIND = CLINE_PROVIDER;
 const DEFAULT_CLINE_SETTINGS = Schema.decodeSync(ClineSettings)({});
 
@@ -136,7 +135,7 @@ export interface ClineAdapterV2Options {
   readonly makeRuntime?: AcpAdapterV2Flavor["makeRuntime"];
 }
 
-export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAdapterV2Flavor {
+function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAdapterV2Flavor {
   const clineSettings: ClineAcpRuntimeClineSettings = {
     binaryPath: options.settings.binaryPath,
     dataDir: options.settings.dataDir,
@@ -211,7 +210,7 @@ export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAd
   };
 }
 
-export const makeClineAdapterV2 = Effect.fn("makeClineAdapterV2")(function* (
+const makeClineAdapterV2 = Effect.fn("makeClineAdapterV2")(function* (
   options: ClineAdapterV2Options,
 ) {
   return yield* makeAcpAdapterV2({
@@ -290,5 +289,3 @@ export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAda
       ),
   ),
 };
-
-export { CLINE_SUPPORTED_RUNTIME_MODES };

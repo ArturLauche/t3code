@@ -49,7 +49,6 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { threadContextsOutsideEnvironment } from "@t3tools/shared/composerContextReferences";
 
-
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 
 import {

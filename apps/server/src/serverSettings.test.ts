@@ -1357,6 +1357,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         },
+        idleCompaction: "onReturn",
         backgroundActivity: {
           schemaVersion: 1,
           profile: "custom",
