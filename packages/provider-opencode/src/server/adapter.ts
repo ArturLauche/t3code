@@ -4066,29 +4066,34 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
  * the server: T3 renders them into OpenCode's own config document, so the
  * driver computes it before the adapter exists.
  */
+const makeOpenCodeAdapterV2ForDriverEffect = Effect.fn("makeOpenCodeAdapterV2ForDriver")(function* (
+  input: ProviderAdapterDriverCreateInput<OpenCodeSettings>,
+  hooks: { readonly environmentOverrides?: NodeJS.ProcessEnv | undefined },
+) {
+  const hostEnvironment = yield* HostProcess.Environment;
+  const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+  const environment = yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment);
+  return yield* makeOpenCodeAdapterV2({
+    instanceId: input.instanceId,
+    settings: { ...input.config, enabled: input.enabled },
+    // Settings-managed OpenCode providers reach the server as the instance's
+    // environment override; the merged config document already carries any
+    // `OPENCODE_CONFIG_CONTENT` the instance itself set.
+    environment:
+      hooks.environmentOverrides === undefined
+        ? environment
+        : { ...environment, ...hooks.environmentOverrides },
+    ...(providerEventLoggers.native === undefined
+      ? {}
+      : { nativeEventLogger: providerEventLoggers.native }),
+  });
+});
+
 export const makeOpenCodeAdapterV2ForDriver = (
   input: ProviderAdapterDriverCreateInput<OpenCodeSettings>,
   hooks: { readonly environmentOverrides?: NodeJS.ProcessEnv | undefined } = {},
 ) =>
-  Effect.gen(function* () {
-    const hostEnvironment = yield* HostProcess.Environment;
-    const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-    const environment = yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment);
-    return yield* makeOpenCodeAdapterV2({
-      instanceId: input.instanceId,
-      settings: { ...input.config, enabled: input.enabled },
-      // Settings-managed OpenCode providers reach the server as the instance's
-      // environment override; the merged config document already carries any
-      // `OPENCODE_CONFIG_CONTENT` the instance itself set.
-      environment:
-        hooks.environmentOverrides === undefined
-          ? environment
-          : { ...environment, ...hooks.environmentOverrides },
-      ...(providerEventLoggers.native === undefined
-        ? {}
-        : { nativeEventLogger: providerEventLoggers.native }),
-    });
-  }).pipe(
+  makeOpenCodeAdapterV2ForDriverEffect(input, hooks).pipe(
     Effect.mapError(
       (cause) =>
         new ProviderAdapterDriverCreateError({

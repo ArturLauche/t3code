@@ -167,8 +167,8 @@ function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAdapterV2
         class: "provider_error",
       }),
     resolveModelId: (selection) => selection.model,
-    applyModelSelection: ({ runtime, modelSelection }) =>
-      Effect.gen(function* () {
+    applyModelSelection: Effect.fn("ClineAdapterV2.applyModelSelection")(
+      function* ({ runtime, modelSelection }) {
         // Cline can be left in Plan mode by the user switching inside its own
         // TUI, so re-select Act on every session setup and every turn's
         // reconfiguration. `resolveClineActModeId` returns the advertised id.
@@ -182,17 +182,20 @@ function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAdapterV2
           mapError: (cause) => cause,
         });
         return modelSelection.model;
-      }).pipe(
-        Effect.mapError(
-          (cause): EffectAcpErrors.AcpError =>
-            new EffectAcpErrors.AcpTransportError({
-              // A model Cline never advertised is a refusal, not a crash: the
-              // CLI would otherwise accept any slug and pin the session to it.
-              detail: cause.message,
-              cause,
-            }),
+      },
+      (effect) =>
+        effect.pipe(
+          Effect.mapError(
+            (cause): EffectAcpErrors.AcpError =>
+              new EffectAcpErrors.AcpTransportError({
+                // A model Cline never advertised is a refusal, not a crash: the
+                // CLI would otherwise accept any slug and pin the session to it.
+                detail: cause.message,
+                cause,
+              }),
+          ),
         ),
-      ),
+    ),
     makeRuntime:
       options.makeRuntime ??
       ((input: AcpAdapterV2RuntimeInput) => {
