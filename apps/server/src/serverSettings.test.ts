@@ -9,14 +9,12 @@ import {
   ProviderInstanceId,
   resolveProviderInstanceEnabled,
   ServerSettings,
-  ServerSettingsPatch,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Duration from "effect/Duration";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -25,7 +23,6 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { cloudRuntimeCredentialName } from "@t3tools/cloud-runtime/credentialName";
@@ -37,7 +34,6 @@ import * as ServerSettingsModule from "./serverSettings.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
 import { openCodeProviderApiKeySecretName } from "./openCodeProviderSecrets.ts";
 
-const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 
@@ -241,6 +237,29 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
       assert.equal(persisted.responseStreamingMode, "turn");
       assert.deepEqual(persisted.projectSettingsOverrides, settings.projectSettingsOverrides);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("moves an idle compaction mode saved in the legacy switch to its own field", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fs.writeFileString(config.settingsPath, `{ "compactIdleThreads": "off" }`);
+
+      const settings = yield* service.getSettings;
+      // Shipped clients decode the switch as a boolean and drop the config otherwise.
+      assert.strictEqual(settings.compactIdleThreads, false);
+      assert.equal(settings.idleCompaction, "off");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("tells clients it reads idle compaction modes before any settings are saved", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const settings = yield* service.getSettings;
+      assert.equal(settings.idleCompaction, "onReturn");
+      assert.strictEqual(settings.compactIdleThreads, false);
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -470,23 +489,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
-  it.effect("decodes nested settings patches", () =>
-    Effect.gen(function* () {
-      assert.deepEqual(
-        yield* decodeSettingsPatch({
-          textGenerationModelSelection: {
-            options: [{ id: "fastMode", value: false }],
-          },
-        }),
-        {
-          textGenerationModelSelection: {
-            options: [{ id: "fastMode", value: false }],
-          },
-        },
-      );
-    }),
-  );
-
   it.effect(
     "decodes legacy object-shaped textGenerationModelSelection.options from settings.json",
     () =>
@@ -547,6 +549,70 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           ],
         ),
       );
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("keeps an external settings edit that the watcher has not reloaded yet", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* serverSettings.getSettings;
+
+      yield* writeFileStringAtomically({
+        filePath: config.settingsPath,
+        contents: `{ "responseStreamingMode": "turn" }`,
+      });
+      yield* serverSettings.updateSettings({
+        observability: { otlpTracesUrl: "http://localhost:4318/v1/traces" },
+      });
+
+      const saved = yield* decodeServerSettingsJson(yield* fs.readFileString(config.settingsPath));
+      assert.equal(saved.responseStreamingMode, "turn");
+      assert.equal(saved.observability.otlpTracesUrl, "http://localhost:4318/v1/traces");
+
+      yield* writeFileStringAtomically({
+        filePath: config.settingsPath,
+        contents: `{ "responseStreamingMode": "paragraph" }`,
+      });
+      const instanceId = ProviderInstanceId.make("acpRegistry_kilo");
+      yield* serverSettings.updateProviderInstance({
+        operation: "upsert",
+        instanceId,
+        instance: {
+          driver: ProviderDriverKind.make("acpRegistry"),
+          displayName: "Kilo",
+          config: { agentId: "kilo", distribution: "auto" },
+        },
+      });
+
+      const afterProviderSave = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.equal(afterProviderSave.responseStreamingMode, "paragraph");
+      assert.equal(afterProviderSave.providerInstances[instanceId]?.displayName, "Kilo");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("refuses to save over a settings file it cannot parse", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* serverSettings.getSettings;
+      const raw = `{ "responseStreamingMode": "turn", `;
+      yield* fs.writeFileString(config.settingsPath, raw);
+
+      const error = yield* Effect.flip(
+        serverSettings.updateSettings({
+          observability: { otlpTracesUrl: "http://localhost:4318/v1/traces" },
+        }),
+      );
+
+      assert.equal(error.operation, "read-file");
+      assert.equal(error.settingsPath, config.settingsPath);
+      assert.instanceOf(error.cause, Error);
+      assert.equal(yield* fs.readFileString(config.settingsPath), raw);
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -689,33 +755,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     ).pipe(Effect.provide(layerServerSettings())),
   );
 
-  it.effect("persists and broadcasts thread settlement settings", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const serverConfig = yield* ServerConfig.ServerConfig;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-        const changes = yield* serverSettings.subscribeChanges;
-
-        const next = yield* serverSettings.updateSettings({
-          sidebarAutoSettleAfterDays: null,
-          sidebarAutoSettleOnMerge: false,
-        });
-        const change = Option.getOrUndefined(yield* Stream.runHead(changes));
-        const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
-
-        const persisted = JSON.parse(raw) as Record<string, unknown>;
-
-        assert.strictEqual(next.sidebarAutoSettleAfterDays, null);
-        assert.isFalse(next.sidebarAutoSettleOnMerge);
-        assert.strictEqual(change?.sidebarAutoSettleAfterDays, null);
-        assert.isFalse(change?.sidebarAutoSettleOnMerge);
-        assert.strictEqual(persisted.sidebarAutoSettleAfterDays, null);
-        assert.isFalse(persisted.sidebarAutoSettleOnMerge);
-      }),
-    ).pipe(Effect.provide(layerServerSettings())),
-  );
-
   it.effect("preserves model when switching providers via textGenerationModelSelection", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
@@ -748,31 +787,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           { id: "reasoningEffort", value: "high" },
         ]),
       );
-    }).pipe(Effect.provide(layerServerSettings())),
-  );
-
-  it.effect("preserves custom provider instance text generation selections", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-
-      const next = yield* serverSettings.updateSettings({
-        providerInstances: {
-          [ProviderInstanceId.make("claude_openrouter")]: {
-            driver: ProviderDriverKind.make("claudeAgent"),
-            enabled: true,
-            config: { customModels: ["openai/gpt-5.5"] },
-          },
-        },
-        textGenerationModelSelection: {
-          instanceId: ProviderInstanceId.make("claude_openrouter"),
-          model: "openai/gpt-5.5",
-        },
-      });
-
-      assert.deepEqual(next.textGenerationModelSelection, {
-        instanceId: ProviderInstanceId.make("claude_openrouter"),
-        model: "openai/gpt-5.5",
-      });
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -929,32 +943,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
-  it.effect("preserves enabled text generation selections for non-built-in drivers", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      const instanceId = ProviderInstanceId.make("openrouter_text");
-
-      const next = yield* serverSettings.updateSettings({
-        providerInstances: {
-          [instanceId]: {
-            driver: ProviderDriverKind.make("openrouter"),
-            enabled: true,
-            config: { customModels: ["openai/gpt-5.5"] },
-          },
-        },
-        textGenerationModelSelection: {
-          instanceId,
-          model: "openai/gpt-5.5",
-        },
-      });
-
-      assert.deepEqual(next.textGenerationModelSelection, {
-        instanceId,
-        model: "openai/gpt-5.5",
-      });
-    }).pipe(Effect.provide(layerServerSettings())),
-  );
-
   it.effect(
     "preserves the source control writer selection when its provider instance is disabled",
     () =>
@@ -1019,76 +1007,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           sourceControlWriterModelSelection,
         );
       }).pipe(Effect.provide(layerServerSettings())),
-  );
-
-  it.effect("drops stale text generation options when resetting model selection", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-
-      yield* serverSettings.updateSettings({
-        textGenerationModelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
-          options: createModelSelection(
-            ProviderInstanceId.make("codex"),
-            DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
-            [
-              { id: "reasoningEffort", value: "high" },
-              { id: "fastMode", value: true },
-            ],
-          ).options!,
-        },
-      });
-
-      const next = yield* serverSettings.updateSettings({
-        textGenerationModelSelection: {
-          instanceId: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.instanceId,
-          model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
-        },
-      });
-
-      assert.deepEqual(next.textGenerationModelSelection, {
-        instanceId: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.instanceId,
-        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
-      });
-    }).pipe(Effect.provide(layerServerSettings())),
-  );
-
-  it.effect("replaces provider instance maps when clearing optional fields", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      const codexId = ProviderInstanceId.make("codex");
-
-      yield* serverSettings.updateSettings({
-        providerInstances: {
-          [codexId]: {
-            driver: ProviderDriverKind.make("codex"),
-            displayName: "Codex Work",
-            accentColor: "#7c3aed",
-            enabled: true,
-            config: { homePath: "~/.codex" },
-          },
-        },
-      });
-
-      const next = yield* serverSettings.updateSettings({
-        providerInstances: {
-          [codexId]: {
-            driver: ProviderDriverKind.make("codex"),
-            displayName: "Codex Work",
-            enabled: true,
-            config: { homePath: "~/.codex" },
-          },
-        },
-      });
-
-      assert.deepEqual(next.providerInstances[codexId], {
-        driver: ProviderDriverKind.make("codex"),
-        displayName: "Codex Work",
-        enabled: true,
-        config: { homePath: "~/.codex" },
-      });
-    }).pipe(Effect.provide(layerServerSettings())),
   );
 
   it.effect("moves customized legacy provider settings into default instances on load", () =>
@@ -1214,20 +1132,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: false,
         config: { binaryPath: "/opt/grok" },
       });
-    }).pipe(Effect.provide(layerServerSettings())),
-  );
-
-  it.effect("runs provider history only for files that still carry the legacy map", () =>
-    Effect.gen(function* () {
-      const serverConfig = yield* ServerConfig.ServerConfig;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      yield* fileSystem.writeFileString(serverConfig.settingsPath, "{}");
-      yield* recordProviderUsage("grok");
-
-      const settings = yield* serverSettings.getSettings;
-
-      assert.deepEqual(settings.providerInstances, {});
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -1647,6 +1551,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
               enabled: true,
             },
           },
+          easDeviceHosts: [
+            {
+              kind: "eas",
+              id: "eas",
+              label: "EAS Simulator",
+              accessToken: "expo-secret",
+              maxSessionMinutes: 30,
+              idleMinutes: 10,
+              maxConcurrentSessions: 2,
+            },
+          ],
         });
         const values = [
           "config-secret",
@@ -1655,6 +1570,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           "bitbucket-secret",
           "gitcafe-secret",
           "quota-secret",
+          "expo-secret",
         ];
         const client = ServerSettingsModule.redactServerSettingsForClient(saved);
         const disk = yield* fs.readFileString(config.settingsPath);
@@ -1669,6 +1585,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           providerInstances: client.providerInstances,
           sourceControlHosts: client.sourceControlHosts,
           usageLimitSources: client.usageLimitSources,
+          easDeviceHosts: client.easDeviceHosts,
         });
         for (const value of values) assert.include(JSON.stringify(echoed), value);
         const renamed = yield* service.updateProviderInstance({

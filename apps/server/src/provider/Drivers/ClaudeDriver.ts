@@ -115,7 +115,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => decodeClaudeSettings({}),
   usage: claudeUsageReader,
-  create: ({
+  create: Effect.fn("ClaudeDriver.create")(function* ({
     instanceId,
     displayName,
     accentColor,
@@ -124,8 +124,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     cloudRuntime,
     enabled,
     config,
-  }) =>
-    Effect.gen(function* () {
+  }) {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -259,8 +258,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         {
           capacity: 1,
           timeToLive: (exit) =>
-            // Only a fresh probe earns the TTL; a failure or its fallback retries on the next check.
-            Exit.isSuccess(exit) && exit.value._tag === "fresh"
+            // Only fresh usage earns the TTL; failures, fallbacks and usage-less probes retry.
+            Exit.isSuccess(exit) &&
+            exit.value._tag === "fresh" &&
+            exit.value.capabilities.usage !== undefined
               ? CAPABILITIES_PROBE_TTL
               : Duration.zero,
         },
@@ -292,6 +293,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
                     Effect.provideService(Path.Path, path),
                   ),
               ),
+            ),
+            Effect.tap((provider) =>
+              provider.auth.status === "unauthenticated"
+                ? Cache.invalidateAll(capabilitiesProbeCache)
+                : Effect.void,
             ),
             Effect.map(stampIdentity),
           ),
@@ -339,8 +345,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       // Same rules as Codex: serialised on the config directory that holds the
       // login, one request id kept until Claude answers (a cooldown or rate
       // limit is an answer), then a re-probe.
-      const consumeResetCredit: NonNullable<ProviderInstance["consumeResetCredit"]> = () =>
-        Effect.gen(function* () {
+      const consumeResetCredit: NonNullable<ProviderInstance["consumeResetCredit"]> = Effect.fn(
+        "ClaudeDriver.consumeResetCredit",
+      )(
+        function* () {
           const current = yield* snapshot.getSnapshot;
           const grantId = current.usageLimits?.resetCredits?.nextCreditId;
           if (!grantId || !current.version) return "noCredit" as const;
@@ -357,19 +365,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
               }),
             ClaudeResetCredits.isSettledClaudeResetCreditFailure,
           );
-        }).pipe(
-          Effect.provideService(HttpClient.HttpClient, httpClient),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-          Effect.mapError(
-            (cause) =>
-              new ProviderDriverError({
-                driver: DRIVER_KIND,
-                instanceId,
-                detail:
-                  cause._tag === "ClaudeResetCreditError"
-                    ? cause.message
-                    : "Claude could not redeem the reset.",
+        },
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail:
+                cause._tag === "ClaudeResetCreditError"
+                  ? cause.message
+                  : "Claude could not redeem the reset.",
                 cause,
               }),
           ),
@@ -420,5 +428,5 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         textGeneration,
         consumeResetCredit,
       } satisfies ProviderInstance;
-    }),
+  });
 };

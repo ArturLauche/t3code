@@ -92,7 +92,7 @@ const resolveEntryEnabled = (entry: ProviderInstanceConfig, typedConfig: unknown
   return entry.enabled ?? providerInstanceConfigEnabledFlag(typedConfig) ?? true;
 };
 
-const buildEntry = <R>(input: {
+const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R>(input: {
   readonly driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>;
   /** Present only where the server runs a cloud runtime. */
   readonly cloudRuntime: Option.Option<CloudRuntimeServiceShape>;
@@ -100,109 +100,105 @@ const buildEntry = <R>(input: {
   readonly instanceId: ProviderInstanceId;
   readonly rawInstanceId: string;
   readonly entry: ProviderInstanceConfig;
-}): Effect.Effect<
+}): Effect.fn.Return<
   | { readonly kind: "live"; readonly live: LiveEntry }
   | { readonly kind: "unavailable"; readonly snapshot: ServerProvider },
   never,
   R
-> =>
-  Effect.gen(function* () {
-    const { driversById, parentScope, instanceId, rawInstanceId, entry, cloudRuntime } = input;
-    const driver = driversById.get(entry.driver);
-    if (!driver) {
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Driver '${entry.driver}' is not registered in this build.`,
-        }),
-      };
-    }
-
-    const decoder = Schema.decodeUnknownEffect(driver.configSchema);
-    const decodeResult = yield* decoder(entry.config ?? driver.defaultConfig()).pipe(Effect.result);
-    if (decodeResult._tag === "Failure") {
-      const issue = decodeResult.failure;
-      const detail = issue.message ?? String(issue);
-      yield* Effect.logError("Failed to decode provider instance config", {
-        instanceId: rawInstanceId,
-        driver: entry.driver,
-        detail,
-      });
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Invalid config for instance '${rawInstanceId}': ${detail}`,
-        }),
-      };
-    }
-
-    const typedConfig = decodeResult.success;
-    if (
-      entry.executionTarget?.enabled === true &&
-      driver.metadata.supportsCloudExecution !== true
-    ) {
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Driver '${entry.driver}' does not support cloud execution.`,
-        }),
-      };
-    }
-    const childScope = yield* Scope.make();
-    yield* Scope.addFinalizer(parentScope, Scope.close(childScope, Exit.void).pipe(Effect.ignore));
-
-    const createResult = yield* driver
-      .create({
+> {
+  const { driversById, parentScope, instanceId, rawInstanceId, entry, cloudRuntime } = input;
+  const driver = driversById.get(entry.driver);
+  if (!driver) {
+    return {
+      kind: "unavailable" as const,
+      snapshot: yield* buildUnavailableProviderSnapshot({
+        driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        environment: entry.environment ?? [],
-        ...(entry.executionTarget ? { executionTarget: entry.executionTarget } : {}),
-        ...(Option.isNone(cloudRuntime) ? {} : { cloudRuntime: cloudRuntime.value }),
-        enabled: resolveEntryEnabled(entry, typedConfig),
-        config: typedConfig,
-      })
-      .pipe(Effect.provideService(Scope.Scope, childScope), Effect.result);
-    if (createResult._tag === "Failure") {
-      yield* Effect.logError("Failed to create provider instance", {
-        instanceId: rawInstanceId,
-        driver: entry.driver,
-        detail: createResult.failure.detail,
-      });
-      yield* Scope.close(childScope, Exit.void).pipe(Effect.ignore);
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Driver '${entry.driver}' failed to create instance: ${createResult.failure.detail}`,
-        }),
-      };
-    }
-
-    return {
-      kind: "live" as const,
-      live: {
-        instance: createResult.success,
-        scope: childScope,
-        entry,
-      },
+        reason: `Driver '${entry.driver}' is not registered in this build.`,
+      }),
     };
-  });
+  }
+
+  const decoder = Schema.decodeUnknownEffect(driver.configSchema);
+  const decodeResult = yield* decoder(entry.config ?? driver.defaultConfig()).pipe(Effect.result);
+  if (decodeResult._tag === "Failure") {
+    const issue = decodeResult.failure;
+    const detail = issue.message ?? String(issue);
+    yield* Effect.logError("Failed to decode provider instance config", {
+      instanceId: rawInstanceId,
+      driver: entry.driver,
+      detail,
+    });
+    return {
+      kind: "unavailable" as const,
+      snapshot: yield* buildUnavailableProviderSnapshot({
+        driverKind: entry.driver,
+        instanceId,
+        displayName: entry.displayName,
+        accentColor: entry.accentColor,
+        reason: `Invalid config for instance '${rawInstanceId}': ${detail}`,
+      }),
+    };
+  }
+
+  const typedConfig = decodeResult.success;
+  if (entry.executionTarget?.enabled === true && driver.metadata.supportsCloudExecution !== true) {
+    return {
+      kind: "unavailable" as const,
+      snapshot: yield* buildUnavailableProviderSnapshot({
+        driverKind: entry.driver,
+        instanceId,
+        displayName: entry.displayName,
+        accentColor: entry.accentColor,
+        reason: `Driver '${entry.driver}' does not support cloud execution.`,
+      }),
+    };
+  }
+  const childScope = yield* Scope.make();
+  yield* Scope.addFinalizer(parentScope, Scope.close(childScope, Exit.void).pipe(Effect.ignore));
+
+  const createResult = yield* driver
+    .create({
+      instanceId,
+      displayName: entry.displayName,
+      accentColor: entry.accentColor,
+      environment: entry.environment ?? [],
+      ...(entry.executionTarget ? { executionTarget: entry.executionTarget } : {}),
+      ...(Option.isNone(cloudRuntime) ? {} : { cloudRuntime: cloudRuntime.value }),
+      enabled: resolveEntryEnabled(entry, typedConfig),
+      config: typedConfig,
+    })
+    .pipe(Effect.provideService(Scope.Scope, childScope), Effect.result);
+  if (createResult._tag === "Failure") {
+    yield* Effect.logError("Failed to create provider instance", {
+      instanceId: rawInstanceId,
+      driver: entry.driver,
+      detail: createResult.failure.detail,
+    });
+    yield* Scope.close(childScope, Exit.void).pipe(Effect.ignore);
+    return {
+      kind: "unavailable" as const,
+      snapshot: yield* buildUnavailableProviderSnapshot({
+        driverKind: entry.driver,
+        instanceId,
+        displayName: entry.displayName,
+        accentColor: entry.accentColor,
+        reason: `Driver '${entry.driver}' failed to create instance: ${createResult.failure.detail}`,
+      }),
+    };
+  }
+
+  return {
+    kind: "live" as const,
+    live: {
+      instance: createResult.success,
+      scope: childScope,
+      entry,
+    },
+  };
+});
 
 const makeReconcile = <R>(input: {
   readonly state: RegistryState;
@@ -364,75 +360,76 @@ const makeReconcile = <R>(input: {
     });
 };
 
-export const makeProviderInstanceRegistry = <R>(input: {
+export const makeProviderInstanceRegistry = Effect.fn(
+  "ProviderInstanceRegistry.makeProviderInstanceRegistry",
+)(function* <R>(input: {
   readonly drivers: ReadonlyArray<AnyProviderDriver<R>>;
   readonly configMap: ProviderInstanceConfigMap;
-}): Effect.Effect<
+}): Effect.fn.Return<
   {
     readonly registry: ProviderInstanceRegistry["Service"];
     readonly mutator: ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutatorShape;
   },
   never,
   R | Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const driversById = new Map<ProviderDriverKind, AnyProviderDriver<R>>(
-      input.drivers.map((driver) => [driver.driverKind, driver]),
-    );
+> {
+  const driversById = new Map<ProviderDriverKind, AnyProviderDriver<R>>(
+    input.drivers.map((driver) => [driver.driverKind, driver]),
+  );
 
-    // Capture the enclosing scope so per-instance child scopes can be
-    // attached to it at `reconcile` time. Without this, `reconcile`
-    // called later (e.g. from the hydration layer) would attach child
-    // scopes to the *caller's* scope instead of the registry's.
-    const parentScope = yield* Scope.Scope;
+  // Capture the enclosing scope so per-instance child scopes can be
+  // attached to it at `reconcile` time. Without this, `reconcile`
+  // called later (e.g. from the hydration layer) would attach child
+  // scopes to the *caller's* scope instead of the registry's.
+  const parentScope = yield* Scope.Scope;
 
-    const driverContext = yield* Effect.context<R>();
-    // A deployment without a cloud runtime still boots every local instance:
-    // the service is resolved once, here, instead of by each driver.
-    const cloudRuntime = yield* Effect.serviceOption(CloudRuntimeService.CloudRuntimeService);
+  const driverContext = yield* Effect.context<R>();
+  // A deployment without a cloud runtime still boots every local instance:
+  // the service is resolved once, here, instead of by each driver.
+  const cloudRuntime = yield* Effect.serviceOption(CloudRuntimeService.CloudRuntimeService);
 
-    const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map());
-    const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ServerProvider>>(new Map());
-    const changes = yield* PubSub.unbounded<void>();
-    yield* Effect.addFinalizer(() => PubSub.shutdown(changes));
+  const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map());
+  const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ServerProvider>>(new Map());
+  const changes = yield* PubSub.unbounded<void>();
+  yield* Effect.addFinalizer(() => PubSub.shutdown(changes));
 
-    const state: RegistryState = { entries, unavailable, changes };
-    const reconcileWithR = makeReconcile({
-      state,
-      driversById,
-      parentScope,
-      cloudRuntime,
-    });
-    const reconcile: ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutatorShape["reconcile"] =
-      (configMap) => reconcileWithR(configMap).pipe(Effect.provideContext(driverContext));
-
-    yield* reconcile(input.configMap);
-
-    const registry: ProviderInstanceRegistry["Service"] = {
-      getInstance: (id) => Ref.get(entries).pipe(Effect.map((map) => map.get(id)?.instance)),
-      listInstances: Ref.get(entries).pipe(
-        Effect.map(
-          (map) =>
-            Array.from(map.values(), (live) => live.instance) as ReadonlyArray<ProviderInstance>,
-        ),
-      ),
-      listUnavailable: Ref.get(unavailable).pipe(
-        Effect.map((map) => Array.from(map.values()) as ReadonlyArray<ServerProvider>),
-      ),
-      get streamChanges() {
-        return Stream.fromPubSub(changes);
-      },
-      get subscribeChanges() {
-        return PubSub.subscribe(changes);
-      },
-    };
-
-    const mutator: ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutatorShape = {
-      reconcile,
-    };
-
-    return { registry, mutator };
+  const state: RegistryState = { entries, unavailable, changes };
+  const reconcileWithR = makeReconcile({
+    state,
+    driversById,
+    parentScope,
+    cloudRuntime,
   });
+  const reconcile: ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutatorShape["reconcile"] =
+    (configMap) => reconcileWithR(configMap).pipe(Effect.provideContext(driverContext));
+
+  yield* reconcile(input.configMap);
+
+  const registry: ProviderInstanceRegistry["Service"] = {
+    getInstance: (id) => Ref.get(entries).pipe(Effect.map((map) => map.get(id)?.instance)),
+    listInstances: Ref.get(entries).pipe(
+      Effect.map(
+        (map) =>
+          Array.from(map.values(), (live) => live.instance) as ReadonlyArray<ProviderInstance>,
+      ),
+    ),
+    listUnavailable: Ref.get(unavailable).pipe(
+      Effect.map((map) => Array.from(map.values()) as ReadonlyArray<ServerProvider>),
+    ),
+    get streamChanges() {
+      return Stream.fromPubSub(changes);
+    },
+    get subscribeChanges() {
+      return PubSub.subscribe(changes);
+    },
+  };
+
+  const mutator: ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutatorShape = {
+    reconcile,
+  };
+
+  return { registry, mutator };
+});
 
 export const layer = <R>(input: {
   readonly drivers: ReadonlyArray<AnyProviderDriver<R>>;

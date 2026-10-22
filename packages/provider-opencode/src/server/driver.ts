@@ -191,8 +191,14 @@ export const OpenCodeDriver: ProviderDriver<
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),
   usage: openCodeUsageReader,
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
+  create: Effect.fn("OpencodeDriver.create")(function* ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    enabled,
+    config,
+  }) {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const pathService = yield* Path.Path;
@@ -395,19 +401,24 @@ export const OpenCodeDriver: ProviderDriver<
         Effect.all(
           {
             skills: openCodeRuntime.loadOpenCodeSkills(client),
-            commands: OpenCodeRuntime.loadOpenCodeCommands(client).pipe(
-              Effect.timeout("10 seconds"),
-              Effect.option,
+            commandInventory: OpenCodeRuntime.loadOpenCodeCommands(client).pipe(
+              Effect.timeoutOption("10 seconds"),
+              Effect.map((commands) => ({
+                commands: Option.getOrElse(commands, () => []),
+                slashCommandsPending: Option.isNone(commands),
+              })),
+              // SDK errors leave command discovery to the provider's health.
+              Effect.orElseSucceed(() => ({
+                commands: [],
+                slashCommandsPending: undefined,
+              })),
             ),
           },
           { concurrency: "unbounded" },
         ).pipe(
-          // Only a finished lookup is reported as complete. A failed one leaves
-          // the flag unset, so the registry decides from the provider's health.
-          Effect.map(({ skills, commands }) => ({
+          Effect.map(({ skills, commandInventory }) => ({
             skills,
-            commands: Option.getOrElse(commands, () => []),
-            slashCommandsPending: Option.isSome(commands) ? false : undefined,
+            ...commandInventory,
           })),
         );
       const loadWorkspaceForCwd = (cwd: string) =>
@@ -541,5 +552,5 @@ export const OpenCodeDriver: ProviderDriver<
         orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
-    }),
+  });
 };

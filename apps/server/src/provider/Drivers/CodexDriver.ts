@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/http";
+import type * as CodexUsageHistory from "../../usage/CodexUsageHistory.ts";
 import { ChildProcessSpawner } from "effect/process";
 
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
@@ -76,6 +77,7 @@ function makeCodexMaintenanceResolver(sharedHomePath: string) {
     nativeUpdate: {
       args: ["update"],
       isCommandPath: isCodexStandaloneCommandPath,
+      requiresCommandPath: true,
       env: { CODEX_HOME: sharedHomePath },
     },
   });
@@ -98,7 +100,11 @@ export type CodexDriverEnv =
   | ServerEnvironment.ServerEnvironmentIdentity
   | CodexInstallation.CodexInstallation;
 
-export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Path> = {
+export const CodexDriver: ProviderDriver<
+  CodexSettings,
+  CodexDriverEnv,
+  Path.Path | CodexUsageHistory.CodexUsageHistory
+> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "Codex",
@@ -108,7 +114,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),
   usage: codexUsageReader,
-  create: ({
+  create: Effect.fn("CodexDriver.create")(function* ({
     instanceId,
     displayName,
     accentColor,
@@ -117,8 +123,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
     cloudRuntime,
     enabled,
     config,
-  }) =>
-    Effect.gen(function* () {
+  }) {
       if (config.setupMode === "managed")
         return yield* makeManagedCodexProvider({
           instanceId,
@@ -371,5 +376,5 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
         orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
-    }),
+  });
 };
