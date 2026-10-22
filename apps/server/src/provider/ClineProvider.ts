@@ -95,34 +95,32 @@ const CLINE_PRESENTATION = {
   supportedRuntimeModes: CLINE_SUPPORTED_RUNTIME_MODES as ReadonlyArray<RuntimeMode>,
 } as const;
 
-export function buildInitialClineProviderSnapshot(
-  clineSettings: ClineSettings,
-): Effect.Effect<ServerProviderDraft> {
-  return Effect.gen(function* () {
-    const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
-    return buildServerProvider({
-      presentation: CLINE_PRESENTATION,
-      enabled: clineSettings.enabled,
-      checkedAt,
-      models: [],
-      probe: clineSettings.enabled
-        ? {
-            installed: true,
-            version: null,
-            status: "warning",
-            auth: { status: "unknown" },
-            message: "Checking Cline CLI availability...",
-          }
-        : {
-            installed: false,
-            version: null,
-            status: "warning",
-            auth: { status: "unknown" },
-            message: "Cline is disabled in T3 Code settings.",
-          },
-    });
+export const buildInitialClineProviderSnapshot = Effect.fn(
+  "ClineProvider.buildInitialClineProviderSnapshot",
+)(function* (clineSettings: ClineSettings): Effect.fn.Return<ServerProviderDraft> {
+  const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
+  return buildServerProvider({
+    presentation: CLINE_PRESENTATION,
+    enabled: clineSettings.enabled,
+    checkedAt,
+    models: [],
+    probe: clineSettings.enabled
+      ? {
+          installed: true,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Checking Cline CLI availability...",
+        }
+      : {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Cline is disabled in T3 Code settings.",
+        },
   });
-}
+});
 
 /** Cline's advertised models, shaped for the T3 model picker. */
 function clineModelsFromSetup(
@@ -215,29 +213,28 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
   );
 });
 
-const runClineCliCommand = (
+const runClineCliCommand = Effect.fn("ClineProvider.runClineCliCommand")(function* (
   clineSettings: ClineSettings,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv | undefined,
-) =>
-  Effect.gen(function* () {
-    const command = expandHomePath(
-      configuredCommand(clineSettings),
-      yield* HostProcess.HomeDirectory,
-    );
-    const spawnCommand = yield* resolveSpawnCommand(
-      command,
-      args,
-      environment ? { env: environment, extendEnv: true } : {},
-    );
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        ...(environment ? { env: environment, extendEnv: true } : {}),
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
+) {
+  const command = expandHomePath(
+    configuredCommand(clineSettings),
+    yield* HostProcess.HomeDirectory,
+  );
+  const spawnCommand = yield* resolveSpawnCommand(
+    command,
+    args,
+    environment ? { env: environment, extendEnv: true } : {},
+  );
+  return yield* spawnAndCollect(
+    command,
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      ...(environment ? { env: environment, extendEnv: true } : {}),
+      shell: spawnCommand.shell,
+    }),
+  );
+});
 
 export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(function* (
   clineSettings: ClineSettings,

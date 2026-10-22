@@ -162,69 +162,68 @@ const archiveCommand = (cwd: string, environment: NodeJS.ProcessEnv) =>
     { env: environment },
   );
 
-const collectArchive = (
+const collectArchive = Effect.fn("CloudExecutionSpawner.collectArchive")(function* (
   fileSystem: FileSystem.FileSystem,
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   cwd: string,
   environment: NodeJS.ProcessEnv,
-) =>
-  Effect.gen(function* () {
-    if (!(yield* fileSystem.exists(cwd))) {
-      return yield* PlatformError.systemError({
-        _tag: "NotFound",
-        module: "CloudExecutionSpawner",
-        method: "archive",
-        pathOrDescriptor: cwd,
-      });
-    }
-    const handle = yield* spawner.spawn(archiveCommand(cwd, environment));
-    const chunks: Uint8Array[] = [];
-    let totalBytes = 0;
-    const collectStdout = Stream.runForEach(handle.stdout, (chunk) => {
-      const nextSize = totalBytes + chunk.byteLength;
-      if (nextSize > MAX_WORKSPACE_ARCHIVE_BYTES) {
-        return Effect.fail(archiveLimitError());
-      }
-      return Effect.sync(() => {
-        totalBytes = nextSize;
-        chunks.push(chunk);
-      });
+) {
+  if (!(yield* fileSystem.exists(cwd))) {
+    return yield* PlatformError.systemError({
+      _tag: "NotFound",
+      module: "CloudExecutionSpawner",
+      method: "archive",
+      pathOrDescriptor: cwd,
     });
-    const [, , exitCode] = yield* Effect.all(
-      [collectStdout, Stream.runDrain(handle.stderr), handle.exitCode],
-      { concurrency: "unbounded" },
-    ).pipe(
-      // `tar` is a host process, so it has to die on every non-clean exit: a
-      // size limit, a failed sibling, and an abandoned request all leave it
-      // running and holding the workspace open otherwise.
-      Effect.onExit((exit) =>
-        Exit.isSuccess(exit) ? Effect.void : handle.kill().pipe(Effect.ignore),
-      ),
-    );
-    if (Number(exitCode) !== 0) {
-      return yield* PlatformError.systemError({
-        _tag: "Unknown",
-        module: "CloudExecutionSpawner",
-        method: "archive",
-        description: `tar exited with code ${Number(exitCode)}`,
-      });
+  }
+  const handle = yield* spawner.spawn(archiveCommand(cwd, environment));
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  const collectStdout = Stream.runForEach(handle.stdout, (chunk) => {
+    const nextSize = totalBytes + chunk.byteLength;
+    if (nextSize > MAX_WORKSPACE_ARCHIVE_BYTES) {
+      return Effect.fail(archiveLimitError());
     }
-    const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    if (bytes.byteLength > MAX_WORKSPACE_ARCHIVE_BYTES) {
-      return yield* PlatformError.systemError({
-        _tag: "InvalidData",
-        module: "CloudExecutionSpawner",
-        method: "archive",
-        description: `workspace archive exceeds ${MAX_WORKSPACE_ARCHIVE_BYTES} bytes`,
-      });
-    }
-    return bytes;
+    return Effect.sync(() => {
+      totalBytes = nextSize;
+      chunks.push(chunk);
+    });
   });
+  const [, , exitCode] = yield* Effect.all(
+    [collectStdout, Stream.runDrain(handle.stderr), handle.exitCode],
+    { concurrency: "unbounded" },
+  ).pipe(
+    // `tar` is a host process, so it has to die on every non-clean exit: a
+    // size limit, a failed sibling, and an abandoned request all leave it
+    // running and holding the workspace open otherwise.
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit) ? Effect.void : handle.kill().pipe(Effect.ignore),
+    ),
+  );
+  if (Number(exitCode) !== 0) {
+    return yield* PlatformError.systemError({
+      _tag: "Unknown",
+      module: "CloudExecutionSpawner",
+      method: "archive",
+      description: `tar exited with code ${Number(exitCode)}`,
+    });
+  }
+  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  if (bytes.byteLength > MAX_WORKSPACE_ARCHIVE_BYTES) {
+    return yield* PlatformError.systemError({
+      _tag: "InvalidData",
+      module: "CloudExecutionSpawner",
+      method: "archive",
+      description: `workspace archive exceeds ${MAX_WORKSPACE_ARCHIVE_BYTES} bytes`,
+    });
+  }
+  return bytes;
+});
 
 /**
  * Child-process transport used by Codex/Claude when a provider instance opts
@@ -293,64 +292,66 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
 
   // Typed with the concrete `CloudProcess` so `terminate` and the PTY adapter see the
   // full class surface; the exported transport narrows it to `CloudSpawnNode`.
-  const spawnNode = (command: ChildProcess.Command, pty?: CloudPtyOptions) =>
-    Effect.gen(function* () {
-      if (command._tag === "PipedCommand") {
-        return yield* PlatformError.systemError({
-          _tag: "BadResource",
-          module: "CloudExecutionSpawner",
-          method: "spawn",
-          description: "piped local commands are not supported by cloud execution",
-        });
-      }
-      const cwd: string = command.options.cwd ?? process.cwd();
-      const handle = yield* prepareFor(cwd);
-      const remoteHome =
-        handle.remoteHome ?? `/tmp/t3-home-${handle.sandboxId.replaceAll(/[^a-zA-Z0-9_-]/gu, "-")}`;
-      const environment = {
-        ...makeCloudEnvironment({
-          base: input.environment,
-          command: command.options.env ?? {},
-          providerEnvironment: input.providerEnvironment,
-        }),
-        T3_CLOUD_EXECUTION: "1",
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        HOME: remoteHome,
-        CLAUDE_CONFIG_DIR: `${remoteHome}/.claude`,
-        CODEX_HOME: `${remoteHome}/.codex`,
-        FREEBUFF_CONFIG_DIR: `${remoteHome}/.freebuff`,
-      };
-      const remoteArgs = command.args.map((argument) =>
-        argument === cwd ? handle.remoteCwd : argument,
+  const spawnNode = Effect.fn("CloudExecutionSpawner.spawnNode")(function* (
+    command: ChildProcess.Command,
+    pty?: CloudPtyOptions,
+  ) {
+    if (command._tag === "PipedCommand") {
+      return yield* PlatformError.systemError({
+        _tag: "BadResource",
+        module: "CloudExecutionSpawner",
+        method: "spawn",
+        description: "piped local commands are not supported by cloud execution",
+      });
+    }
+    const cwd: string = command.options.cwd ?? process.cwd();
+    const handle = yield* prepareFor(cwd);
+    const remoteHome =
+      handle.remoteHome ?? `/tmp/t3-home-${handle.sandboxId.replaceAll(/[^a-zA-Z0-9_-]/gu, "-")}`;
+    const environment = {
+      ...makeCloudEnvironment({
+        base: input.environment,
+        command: command.options.env ?? {},
+        providerEnvironment: input.providerEnvironment,
+      }),
+      T3_CLOUD_EXECUTION: "1",
+      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      HOME: remoteHome,
+      CLAUDE_CONFIG_DIR: `${remoteHome}/.claude`,
+      CODEX_HOME: `${remoteHome}/.codex`,
+      FREEBUFF_CONFIG_DIR: `${remoteHome}/.freebuff`,
+    };
+    const remoteArgs = command.args.map((argument) =>
+      argument === cwd ? handle.remoteCwd : argument,
+    );
+    const cloudProcess = yield* input.cloud
+      .startProcess(handle.runtimeId, handle.sandboxId, {
+        command: remoteCommandName(command.command),
+        args: remoteArgs,
+        cwd: handle.remoteCwd,
+        env: environment,
+        timeoutSeconds: 86_400,
+        ...(pty ? { pty } : {}),
+      })
+      .pipe(
+        Effect.mapError(cloudPlatformError),
+        Effect.tapError(() => Effect.sync(() => invalidatePrepared(cwd))),
       );
-      const cloudProcess = yield* input.cloud
-        .startProcess(handle.runtimeId, handle.sandboxId, {
-          command: remoteCommandName(command.command),
-          args: remoteArgs,
-          cwd: handle.remoteCwd,
-          env: environment,
-          timeoutSeconds: 86_400,
-          ...(pty ? { pty } : {}),
-        })
-        .pipe(
-          Effect.mapError(cloudPlatformError),
-          Effect.tapError(() => Effect.sync(() => invalidatePrepared(cwd))),
-        );
-      const active = (activeProcesses.get(cwd) ?? 0) + 1;
-      activeProcesses.set(cwd, active);
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        const remaining = Math.max(0, (activeProcesses.get(cwd) ?? 1) - 1);
-        if (remaining === 0) activeProcesses.delete(cwd);
-        else activeProcesses.set(cwd, remaining);
-        invalidatePrepared(cwd);
-      };
-      cloudProcess.once("exit", release);
-      void cloudProcess.wait().then(release, release);
-      return cloudProcess;
-    });
+    const active = (activeProcesses.get(cwd) ?? 0) + 1;
+    activeProcesses.set(cwd, active);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      const remaining = Math.max(0, (activeProcesses.get(cwd) ?? 1) - 1);
+      if (remaining === 0) activeProcesses.delete(cwd);
+      else activeProcesses.set(cwd, remaining);
+      invalidatePrepared(cwd);
+    };
+    cloudProcess.once("exit", release);
+    void cloudProcess.wait().then(release, release);
+    return cloudProcess;
+  });
 
   /**
    * Stop a cloud process, escalating so a release never returns while the

@@ -49,28 +49,27 @@ const FREEBUFF_PRESENTATION = {
 
 const VERSION_PROBE_TIMEOUT_MS = 15_000;
 
-const probeFreebuffVersion = (
+const probeFreebuffVersion = Effect.fn("FreebuffProvider.probeFreebuffVersion")(function* (
   settings: FreebuffSettings,
   environment: NodeJS.ProcessEnv,
   cwd: string,
-) =>
-  Effect.gen(function* () {
-    const binaryPath = expandHomePath(
-      settings.binaryPath || "freebuff",
-      yield* HostProcess.HomeDirectory,
-    );
-    const command = yield* resolveSpawnCommand(binaryPath, ["--version"], {
-      env: environment,
-    });
-    return yield* spawnAndCollect(
-      binaryPath,
-      ChildProcess.make(command.command, command.args, {
-        cwd,
-        env: environment,
-        shell: command.shell,
-      }),
-    );
+) {
+  const binaryPath = expandHomePath(
+    settings.binaryPath || "freebuff",
+    yield* HostProcess.HomeDirectory,
+  );
+  const command = yield* resolveSpawnCommand(binaryPath, ["--version"], {
+    env: environment,
   });
+  return yield* spawnAndCollect(
+    binaryPath,
+    ChildProcess.make(command.command, command.args, {
+      cwd,
+      env: environment,
+      shell: command.shell,
+    }),
+  );
+});
 
 export function buildInitialFreebuffProviderSnapshot(
   settings: FreebuffSettings,

@@ -21,7 +21,7 @@ const CLINE: ServerProvider = {
   version: "3.0.65",
   status: "ready",
   auth: { status: "authenticated" },
-  checkedAt: new Date().toISOString(),
+  checkedAt: "2026-01-01T00:00:00.000Z",
   models: [{ slug: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5" }],
 } as unknown as ServerProvider;
 
