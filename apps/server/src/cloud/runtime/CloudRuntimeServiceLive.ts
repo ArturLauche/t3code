@@ -238,24 +238,26 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
    */
   const requireConfig = (runtimeId: CloudRuntimeId) => resolveConfig(runtimeId);
 
-  const makeVendorFor = (runtimeId: CloudRuntimeId, options?: { requireEnabled?: boolean }) =>
-    Effect.gen(function* () {
-      const { config, apiKey } = yield* resolveConfig(runtimeId, options);
-      if (!apiKey) {
-        return yield* new CloudRuntimeError({
-          runtimeId,
-          operation: "authenticate",
-          reason: "credential_missing",
-          message: "Add an API key for this cloud runtime.",
-        });
-      }
-      const vendor = yield* Effect.try({
-        try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
-        catch: (cause) =>
-          mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
+  const makeVendorFor = Effect.fn("CloudRuntimeServiceLive.makeVendorFor")(function* (
+    runtimeId: CloudRuntimeId,
+    options?: { requireEnabled?: boolean },
+  ) {
+    const { config, apiKey } = yield* resolveConfig(runtimeId, options);
+    if (!apiKey) {
+      return yield* new CloudRuntimeError({
+        runtimeId,
+        operation: "authenticate",
+        reason: "credential_missing",
+        message: "Add an API key for this cloud runtime.",
       });
-      return { vendor, apiKey };
+    }
+    const vendor = yield* Effect.try({
+      try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
+      catch: (cause) =>
+        mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
     });
+    return { vendor, apiKey };
+  });
 
   const closeVendor = (vendor: CloudVendorAdapter): Effect.Effect<void> =>
     vendor.close

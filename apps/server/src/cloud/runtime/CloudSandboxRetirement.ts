@@ -53,12 +53,8 @@ export interface CloudSandboxRetirementDependencies {
   }) => CloudVendorAdapter;
 }
 
-const deleteSandboxes = (
-  runtimeId: CloudRuntimeId,
-  vendor: CloudVendorAdapter,
-  environmentId: string,
-) =>
-  Effect.gen(function* () {
+const deleteSandboxes = Effect.fn("CloudSandboxRetirement.deleteSandboxes")(
+  function* (runtimeId: CloudRuntimeId, vendor: CloudVendorAdapter, environmentId: string) {
     const sandboxes: ReadonlyArray<CloudSandboxSummary> = yield* Effect.promise(() =>
       vendor.listSandboxes(),
     );
@@ -76,11 +72,14 @@ const deleteSandboxes = (
         ),
       );
     }
-  }).pipe(
-    Effect.ensuring(
-      vendor.close ? Effect.promise(() => vendor.close!()).pipe(Effect.ignore) : Effect.void,
+  },
+  (effect, _runtimeId, vendor) =>
+    effect.pipe(
+      Effect.ensuring(
+        vendor.close ? Effect.promise(() => vendor.close!()).pipe(Effect.ignore) : Effect.void,
+      ),
     ),
-  );
+);
 
 /**
  * Deletes the sandboxes of every runtime that disappeared or was repointed

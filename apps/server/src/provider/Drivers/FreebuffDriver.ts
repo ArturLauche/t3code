@@ -23,6 +23,7 @@ import { makeManagedServerProvider } from "@t3tools/provider-core/server/managed
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
+  type ProviderDriverCreateInput,
   type ProviderInstance,
 } from "@t3tools/provider-core/server/driver";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -72,127 +73,131 @@ export const FreebuffDriver: ProviderDriver<FreebuffSettings, FreebuffDriverEnv>
   },
   configSchema: FreebuffSettings,
   defaultConfig: (): FreebuffSettings => decodeFreebuffSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const serverConfig = yield* ServerConfig;
-      const idAllocator = yield* IdAllocator.IdAllocatorV2;
-      const effectiveConfig = {
-        ...config,
-        enabled,
-        binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
-      } satisfies FreebuffSettings;
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: FREEBUFF_PROVIDER,
-        instanceId,
-      });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: FREEBUFF_PROVIDER,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
-      const configDir = yield* resolveFreebuffConfigDir({
-        settings: effectiveConfig,
-        instanceId,
-        stateDir: serverConfig.stateDir,
-      }).pipe(
-        Effect.provideService(Path.Path, path),
+  create: Effect.fn("FreebuffDriver.create")(function* ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    enabled,
+    config,
+  }: ProviderDriverCreateInput<FreebuffSettings>) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const serverConfig = yield* ServerConfig;
+    const idAllocator = yield* IdAllocator.IdAllocatorV2;
+    const effectiveConfig = {
+      ...config,
+      enabled,
+      binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+    } satisfies FreebuffSettings;
+    const continuationIdentity = defaultProviderContinuationIdentity({
+      driverKind: FREEBUFF_PROVIDER,
+      instanceId,
+    });
+    const stampIdentity = withInstanceIdentity({
+      instanceId,
+      driverKind: FREEBUFF_PROVIDER,
+      displayName,
+      accentColor,
+      continuationGroupKey: continuationIdentity.continuationKey,
+    });
+    const configDir = yield* resolveFreebuffConfigDir({
+      settings: effectiveConfig,
+      instanceId,
+      stateDir: serverConfig.stateDir,
+    }).pipe(
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: FREEBUFF_PROVIDER,
+            instanceId,
+            detail: "Failed to resolve the Freebuff configuration directory.",
+            cause,
+          }),
+      ),
+    );
+    if (effectiveConfig.enabled) {
+      yield* ensureFreebuffConfigDir(configDir).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.mapError(
           (cause) =>
             new ProviderDriverError({
               driver: FREEBUFF_PROVIDER,
               instanceId,
-              detail: "Failed to resolve the Freebuff configuration directory.",
+              detail: "Failed to create the Freebuff configuration directory.",
               cause,
             }),
         ),
       );
-      if (effectiveConfig.enabled) {
-        yield* ensureFreebuffConfigDir(configDir).pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.mapError(
-            (cause) =>
-              new ProviderDriverError({
-                driver: FREEBUFF_PROVIDER,
-                instanceId,
-                detail: "Failed to create the Freebuff configuration directory.",
-                cause,
-              }),
-          ),
+    }
+    const processEnvironment: NodeJS.ProcessEnv = {
+      ...(yield* mergeProviderInstanceEnvironment(environment)),
+      FREEBUFF_CONFIG_DIR: configDir,
+    };
+    const readIsAuthenticated = Effect.gen(function* () {
+      const hasCredentialsFile = yield* fileSystem
+        .readFileString(path.join(configDir, "credentials.json"))
+        .pipe(
+          Effect.map(freebuffCredentialsHaveToken),
+          Effect.orElseSucceed(() => false),
         );
-      }
-      const processEnvironment: NodeJS.ProcessEnv = {
-        ...(yield* mergeProviderInstanceEnvironment(environment)),
-        FREEBUFF_CONFIG_DIR: configDir,
-      };
-      const readIsAuthenticated = Effect.gen(function* () {
-        const hasCredentialsFile = yield* fileSystem
-          .readFileString(path.join(configDir, "credentials.json"))
-          .pipe(
-            Effect.map(freebuffCredentialsHaveToken),
-            Effect.orElseSucceed(() => false),
-          );
-        return hasCredentialsFile || Boolean(processEnvironment.CODEBUFF_API_KEY?.trim());
-      });
-      // The server provides the live PTY service at the runtime boundary;
-      // Freebuff intentionally has no cloud PTY transport.
-      const orchestrationAdapter = makeFreebuffAdapterV2({
-        instanceId,
-        settings: effectiveConfig,
-        configDir,
-        environment: processEnvironment,
-        idAllocator,
-        serverConfig,
-      });
-      const checkProvider = Effect.gen(function* () {
-        const isAuthenticated = yield* readIsAuthenticated;
-        return yield* checkFreebuffProviderStatus(
-          effectiveConfig,
-          processEnvironment,
-          serverConfig.cwd,
-          isAuthenticated,
-        );
-      }).pipe(
-        Effect.map(stampIdentity),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+      return hasCredentialsFile || Boolean(processEnvironment.CODEBUFF_API_KEY?.trim());
+    });
+    // The server provides the live PTY service at the runtime boundary;
+    // Freebuff intentionally has no cloud PTY transport.
+    const orchestrationAdapter = makeFreebuffAdapterV2({
+      instanceId,
+      settings: effectiveConfig,
+      configDir,
+      environment: processEnvironment,
+      idAllocator,
+      serverConfig,
+    });
+    const checkProvider = Effect.gen(function* () {
+      const isAuthenticated = yield* readIsAuthenticated;
+      return yield* checkFreebuffProviderStatus(
+        effectiveConfig,
+        processEnvironment,
+        serverConfig.cwd,
+        isAuthenticated,
       );
-      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
-      const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<FreebuffSettings>>(
-        {
-          resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
-          getSettings: snapshotSettings.getSettings,
-          streamSettings: snapshotSettings.streamSettings,
-          haveSettingsChanged: haveProviderSnapshotSettingsChanged,
-          initialSnapshot: (settings) =>
-            buildInitialFreebuffProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
-          checkProvider,
-        },
-      ).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: FREEBUFF_PROVIDER,
-              instanceId,
-              detail: `Failed to build Freebuff snapshot: ${cause.message ?? String(cause)}`,
-              cause,
-            }),
-        ),
-      );
+    }).pipe(
+      Effect.map(stampIdentity),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+    );
+    const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
+    const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<FreebuffSettings>>({
+      resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
+      getSettings: snapshotSettings.getSettings,
+      streamSettings: snapshotSettings.streamSettings,
+      haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+      initialSnapshot: (settings) =>
+        buildInitialFreebuffProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
+      checkProvider,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: FREEBUFF_PROVIDER,
+            instanceId,
+            detail: `Failed to build Freebuff snapshot: ${cause.message ?? String(cause)}`,
+            cause,
+          }),
+      ),
+    );
 
-      return {
-        instanceId,
-        driverKind: FREEBUFF_PROVIDER,
-        continuationIdentity,
-        displayName,
-        accentColor,
-        enabled,
-        snapshot,
-        orchestrationAdapter,
-        textGeneration: makeUnsupportedTextGeneration(FREEBUFF_PROVIDER),
-      } satisfies ProviderInstance;
-    }),
+    return {
+      instanceId,
+      driverKind: FREEBUFF_PROVIDER,
+      continuationIdentity,
+      displayName,
+      accentColor,
+      enabled,
+      snapshot,
+      orchestrationAdapter,
+      textGeneration: makeUnsupportedTextGeneration(FREEBUFF_PROVIDER),
+    } satisfies ProviderInstance;
+  }),
 };

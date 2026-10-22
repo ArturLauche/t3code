@@ -330,36 +330,30 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
   const removeRuntime = (id: CloudRuntimeId) => {
     setBusyId(id);
     void (async () => {
-      try {
-        await clearCredential({ environmentId, input: { runtimeId: id } });
-      } catch {
-        // The settings update below also removes stale credentials server-side.
-      } finally {
-        void updateSettings({
-          environmentId,
-          input: { patch: { cloudRuntimeInstances: { [id]: null } } },
-        });
-        setApiKeys((current) => {
-          const copy = { ...current };
-          delete copy[id];
-          return copy;
-        });
-        // A re-added runtime must not inherit an endpoint or a setup-command
-        // draft from the one that was just removed.
-        discardDraft(setApiUrlDrafts, id);
-        discardDraft(setSetupCommandDrafts, id);
-        setBusyId(null);
-      }
+      // The settings update below also removes stale credentials server-side.
+      await clearCredential({ environmentId, input: { runtimeId: id } }).catch(() => undefined);
+      void updateSettings({
+        environmentId,
+        input: { patch: { cloudRuntimeInstances: { [id]: null } } },
+      });
+      setApiKeys((current) => {
+        const copy = { ...current };
+        delete copy[id];
+        return copy;
+      });
+      // A re-added runtime must not inherit an endpoint or a setup-command
+      // draft from the one that was just removed.
+      discardDraft(setApiUrlDrafts, id);
+      discardDraft(setSetupCommandDrafts, id);
+      setBusyId(null);
     })();
   };
 
   const run = async (id: CloudRuntimeId, action: () => Promise<unknown>) => {
     setBusyId(id);
-    try {
-      await action();
-    } finally {
+    await action().finally(() => {
       setBusyId((current) => (current === id ? null : current));
-    }
+    });
   };
 
   /**

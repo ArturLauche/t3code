@@ -40,6 +40,7 @@ import { makeManagedServerProvider } from "@t3tools/provider-core/server/managed
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
+  type ProviderDriverCreateInput,
   type ProviderInstance,
 } from "@t3tools/provider-core/server/driver";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -88,118 +89,121 @@ export const ClineDriver: ProviderDriver<ClineSettings, ClineDriverEnv> = {
   },
   configSchema: ClineSettings,
   defaultConfig: (): ClineSettings => decodeClineSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const crypto = yield* Crypto.Crypto;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const httpClient = yield* HttpClient.HttpClient;
-      const path = yield* Path.Path;
-      const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
-      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: DRIVER_KIND,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
-      const effectiveConfig = { ...config, enabled } satisfies ClineSettings;
-      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
-        resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-          binaryPath: effectiveConfig.binaryPath,
-          env: processEnv,
-        }).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        ),
-      );
+  create: Effect.fn("ClineDriver.create")(function* ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    enabled,
+    config,
+  }: ProviderDriverCreateInput<ClineSettings>) {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const crypto = yield* Crypto.Crypto;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const httpClient = yield* HttpClient.HttpClient;
+    const path = yield* Path.Path;
+    const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+    const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    const continuationIdentity = defaultProviderContinuationIdentity({
+      driverKind: DRIVER_KIND,
+      instanceId,
+    });
+    const stampIdentity = withInstanceIdentity({
+      instanceId,
+      driverKind: DRIVER_KIND,
+      displayName,
+      accentColor,
+      continuationGroupKey: continuationIdentity.continuationKey,
+    });
+    const effectiveConfig = { ...config, enabled } satisfies ClineSettings;
+    const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+      resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      ),
+    );
 
-      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
-      const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClineSettings>>({
-        resolveMaintenance,
-        getSettings: snapshotSettings.getSettings,
-        streamSettings: snapshotSettings.streamSettings,
-        haveSettingsChanged: haveProviderSnapshotSettingsChanged,
-        initialSnapshot: (settings) =>
-          buildInitialClineProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
-        checkProvider: checkClineProviderStatus(effectiveConfig, processEnv).pipe(
-          Effect.map(stampIdentity),
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(Crypto.Crypto, crypto),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        ),
-        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
-          resolveMaintenance().pipe(
-            Effect.flatMap((maintenanceCapabilities) =>
-              enrichProviderSnapshotWithVersionAdvisory(currentSnapshot, maintenanceCapabilities, {
-                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-              }).pipe(
-                Effect.provideService(
-                  ProviderLatestVersions.ProviderLatestVersions,
-                  latestVersions,
-                ),
-              ),
+    const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
+    const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClineSettings>>({
+      resolveMaintenance,
+      getSettings: snapshotSettings.getSettings,
+      streamSettings: snapshotSettings.streamSettings,
+      haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+      initialSnapshot: (settings) =>
+        buildInitialClineProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
+      checkProvider: checkClineProviderStatus(effectiveConfig, processEnv).pipe(
+        Effect.map(stampIdentity),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      ),
+      enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
+        resolveMaintenance().pipe(
+          Effect.flatMap((maintenanceCapabilities) =>
+            enrichProviderSnapshotWithVersionAdvisory(currentSnapshot, maintenanceCapabilities, {
+              enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+            }).pipe(
+              Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
             ),
-            Effect.flatMap((enriched) => publishSnapshot(enriched)),
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Cline version advisory enrichment failed", {
-                errorTag: causeErrorTag(cause),
-              }),
-            ),
-            Effect.asVoid,
-            Effect.provideService(HttpClient.HttpClient, httpClient),
           ),
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: DRIVER_KIND,
-              instanceId,
-              detail: `Failed to build the Cline provider snapshot: ${cause.message ?? String(cause)}`,
-              cause,
+          Effect.flatMap((enriched) => publishSnapshot(enriched)),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Cline version advisory enrichment failed", {
+              errorTag: causeErrorTag(cause),
             }),
+          ),
+          Effect.asVoid,
+          Effect.provideService(HttpClient.HttpClient, httpClient),
         ),
-      );
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail: `Failed to build the Cline provider snapshot: ${cause.message ?? String(cause)}`,
+            cause,
+          }),
+      ),
+    );
 
-      const orchestrationAdapter = yield* ClineAdapterV2Driver.create({
-        instanceId,
-        displayName,
-        accentColor,
-        environment,
-        enabled,
-        config,
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: DRIVER_KIND,
-              instanceId,
-              detail: "Failed to build the Cline orchestration adapter.",
-              cause,
-            }),
-        ),
-      );
+    const orchestrationAdapter = yield* ClineAdapterV2Driver.create({
+      instanceId,
+      displayName,
+      accentColor,
+      environment,
+      enabled,
+      config,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail: "Failed to build the Cline orchestration adapter.",
+            cause,
+          }),
+      ),
+    );
 
-      return {
-        instanceId,
-        driverKind: DRIVER_KIND,
-        continuationIdentity,
-        displayName,
-        accentColor,
-        enabled,
-        snapshot,
-        orchestrationAdapter,
-        // Declared unsupported through the snapshot's `supportsTextGeneration`,
-        // so this only answers if a caller reaches for it anyway.
-        textGeneration: makeUnsupportedTextGeneration(DRIVER_KIND),
-      } satisfies ProviderInstance;
-    }),
+    return {
+      instanceId,
+      driverKind: DRIVER_KIND,
+      continuationIdentity,
+      displayName,
+      accentColor,
+      enabled,
+      snapshot,
+      orchestrationAdapter,
+      // Declared unsupported through the snapshot's `supportsTextGeneration`,
+      // so this only answers if a caller reaches for it anyway.
+      textGeneration: makeUnsupportedTextGeneration(DRIVER_KIND),
+    } satisfies ProviderInstance;
+  }),
 };

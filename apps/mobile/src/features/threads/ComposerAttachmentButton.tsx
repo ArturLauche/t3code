@@ -12,6 +12,7 @@ const ATTACHMENT_MENU_ACTIONS: MenuAction[] = [
 
 export function ComposerAttachmentButton(props: {
   readonly disabled?: boolean;
+  readonly size?: "regular" | "large";
   readonly supportsFiles: boolean;
   /**
    * Whether the selected provider can consume images in a prompt. Absent means
@@ -50,7 +51,7 @@ export function ComposerAttachmentButton(props: {
     >
       <SymbolView
         name="plus"
-        size={Math.round(20 * scale)}
+        size={Math.round((props.size === "large" ? 26 : 20) * scale)}
         weight="regular"
         tintColorClassName="accent-icon"
         type="monochrome"
