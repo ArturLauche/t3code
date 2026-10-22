@@ -34,9 +34,13 @@ import { CloudRuntimeService } from "@t3tools/cloud-runtime/CloudRuntimeService"
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@t3tools/provider-cursor/server";
+import type { CursorSettings } from "@t3tools/provider-cursor/settings";
 import { FreebuffDriver, type FreebuffDriverEnv } from "./Drivers/FreebuffDriver.ts";
 import { GrokDriver, type GrokDriverEnv } from "@t3tools/provider-grok/server";
+import type { GrokSettings } from "@t3tools/provider-grok/settings";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "@t3tools/provider-opencode/server";
+import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
+import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCodeServerLedger";
 import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";
@@ -920,4 +924,3 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       ),
   );
 });
-

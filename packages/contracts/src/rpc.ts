@@ -1947,6 +1947,21 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+// The fork's cloud-runtime methods live in their own group so the server can
+// build their handlers in a separate layer: `toLayer` maps over every RPC in
+// the group once per handler, and one group with all of them exceeds
+// TypeScript's instantiation limit.
+export const WsCloudRuntimeRpcGroup = RpcGroup.make(
+  WsCloudRuntimeListRpc,
+  WsCloudRuntimeSetCredentialRpc,
+  WsCloudRuntimeClearCredentialRpc,
+  WsCloudRuntimeTestRpc,
+  WsCloudRuntimeCreateSandboxRpc,
+  WsCloudRuntimeListSandboxesRpc,
+  WsCloudRuntimeSandboxActionRpc,
+  WsCloudRuntimeExecuteRpc,
+).middleware(RpcScopeAuthorization);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -2014,14 +2029,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
-  WsCloudRuntimeListRpc,
-  WsCloudRuntimeSetCredentialRpc,
-  WsCloudRuntimeClearCredentialRpc,
-  WsCloudRuntimeTestRpc,
-  WsCloudRuntimeCreateSandboxRpc,
-  WsCloudRuntimeListSandboxesRpc,
-  WsCloudRuntimeSandboxActionRpc,
-  WsCloudRuntimeExecuteRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,
@@ -2154,4 +2161,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
-).middleware(RpcScopeAuthorization);
+)
+  .middleware(RpcScopeAuthorization)
+  .merge(WsCloudRuntimeRpcGroup);

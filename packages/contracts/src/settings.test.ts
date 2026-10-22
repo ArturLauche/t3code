@@ -424,6 +424,7 @@ describe("ServerSettingsPatch string normalization", () => {
     });
 
     expect(encoded.addProjectBaseDirectory).toBe("~/Development");
+  });
 });
 
 describe("ServerSettings environment icon", () => {

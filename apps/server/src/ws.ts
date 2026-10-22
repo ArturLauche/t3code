@@ -94,6 +94,7 @@ import {
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
   WS_METHODS,
+  WsCloudRuntimeRpcGroup,
   WsRpcGroup,
 } from "@t3tools/contracts";
 import {
@@ -546,6 +547,21 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
 const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
+// `toLayer` instantiates over every RPC in the group once per handler, and the
+// full group is already at TypeScript's limit. The fork's cloud-runtime methods
+// get their own group so their handlers can be layered separately.
+const CLOUD_RUNTIME_RPC_TAGS = [
+  WS_METHODS.cloudRuntimeList,
+  WS_METHODS.cloudRuntimeSetCredential,
+  WS_METHODS.cloudRuntimeClearCredential,
+  WS_METHODS.cloudRuntimeTest,
+  WS_METHODS.cloudRuntimeCreateSandbox,
+  WS_METHODS.cloudRuntimeListSandboxes,
+  WS_METHODS.cloudRuntimeSandboxAction,
+  WS_METHODS.cloudRuntimeExecute,
+] as const;
+const ServerWsRpcCoreGroup = ServerWsRpcGroup.omit(...CLOUD_RUNTIME_RPC_TAGS);
+const ServerWsRpcCloudRuntimeGroup = WsCloudRuntimeRpcGroup.middleware(RpcInstrumentation);
 // Replaying each intervening event costs a shell refetch; past this gap a
 // single O(active-threads) snapshot is cheaper and bounded.
 const SHELL_RESUME_MAX_GAP = 1_000;
@@ -1189,7 +1205,7 @@ export const layerWsRpc = (
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
 ) =>
-  ServerWsRpcGroup.toLayer(
+  Layer.unwrap(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1806,7 +1822,7 @@ export const layerWsRpc = (
         return result;
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = ServerWsRpcCoreGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -2459,16 +2475,6 @@ export const layerWsRpc = (
                 Effect.forkScoped,
               ),
           ),
-        // Fork-only: remote sandboxes a provider instance can be pointed at.
-        [WS_METHODS.cloudRuntimeList]: () => cloudRuntimes.list(),
-        [WS_METHODS.cloudRuntimeSetCredential]: (input) => cloudRuntimes.setCredential(input),
-        [WS_METHODS.cloudRuntimeClearCredential]: (input) =>
-          cloudRuntimes.clearCredential(input.runtimeId),
-        [WS_METHODS.cloudRuntimeTest]: (input) => cloudRuntimes.test(input),
-        [WS_METHODS.cloudRuntimeCreateSandbox]: (input) => cloudRuntimes.createSandbox(input),
-        [WS_METHODS.cloudRuntimeListSandboxes]: (input) => cloudRuntimes.listSandboxes(input),
-        [WS_METHODS.cloudRuntimeSandboxAction]: (input) => cloudRuntimes.sandboxAction(input),
-        [WS_METHODS.cloudRuntimeExecute]: (input) => cloudRuntimes.execute(input),
         [WS_METHODS.pullRequestsList]: (input) => pullRequests.list(input),
         [WS_METHODS.pullRequestsListStats]: (input) => pullRequests.listStats(input),
         [WS_METHODS.pullRequestsRoutingIdentity]: (input) => pullRequests.routingIdentity(input),
@@ -3136,7 +3142,22 @@ export const layerWsRpc = (
             ),
           ),
       });
-      return handlers;
+      const cloudRuntimeHandlers = ServerWsRpcCloudRuntimeGroup.of({
+        // Fork-only: remote sandboxes a provider instance can be pointed at.
+        [WS_METHODS.cloudRuntimeList]: () => cloudRuntimes.list(),
+        [WS_METHODS.cloudRuntimeSetCredential]: (input) => cloudRuntimes.setCredential(input),
+        [WS_METHODS.cloudRuntimeClearCredential]: (input) =>
+          cloudRuntimes.clearCredential(input.runtimeId),
+        [WS_METHODS.cloudRuntimeTest]: (input) => cloudRuntimes.test(input),
+        [WS_METHODS.cloudRuntimeCreateSandbox]: (input) => cloudRuntimes.createSandbox(input),
+        [WS_METHODS.cloudRuntimeListSandboxes]: (input) => cloudRuntimes.listSandboxes(input),
+        [WS_METHODS.cloudRuntimeSandboxAction]: (input) => cloudRuntimes.sandboxAction(input),
+        [WS_METHODS.cloudRuntimeExecute]: (input) => cloudRuntimes.execute(input),
+      });
+      return Layer.merge(
+        ServerWsRpcCoreGroup.toLayer(Effect.succeed(handlers)),
+        ServerWsRpcCloudRuntimeGroup.toLayer(Effect.succeed(cloudRuntimeHandlers)),
+      );
     }),
   );
 

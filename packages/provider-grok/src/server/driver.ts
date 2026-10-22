@@ -124,57 +124,43 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv, Path.Path> 
     config,
   }) {
     const crypto = yield* Crypto.Crypto;
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const cloudRuntime = yield* CloudRuntimeService;
-      const httpClient = yield* HttpClient.HttpClient;
-      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const host = yield* ProviderHost.ProviderHost;
-      const { cwd } = host.paths;
-      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: DRIVER_KIND,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
-      const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
-      const cloudTransport =
-        executionTarget?.enabled === true
-          ? yield* makeCloudExecutionSpawner({
-              cloud: cloudRuntime,
-              localSpawner: spawner,
-              runtimeId: executionTarget.runtimeId,
-              instanceId,
-              environment: processEnv,
-              providerEnvironment: environment,
-              sandboxPrefix: `t3-grok-${instanceId}`,
-            })
-          : undefined;
-      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
-        resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-          binaryPath: effectiveConfig.binaryPath,
-          env: processEnv,
-        }).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        ),
-      );
-      const orchestrationAdapter = yield* GrokAdapterV2Driver.create({
-        instanceId,
-        displayName,
-        accentColor,
-        environment,
-        enabled,
-        config,
-        ...(cloudTransport ? { cloudTransport } : {}),
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const cloudRuntime = yield* CloudRuntimeService;
+    const httpClient = yield* HttpClient.HttpClient;
+    const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const host = yield* ProviderHost.ProviderHost;
+    const { cwd } = host.paths;
+    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    const continuationIdentity = defaultProviderContinuationIdentity({
+      driverKind: DRIVER_KIND,
+      instanceId,
+    });
+    const stampIdentity = withInstanceIdentity({
+      instanceId,
+      driverKind: DRIVER_KIND,
+      displayName,
+      accentColor,
+      continuationGroupKey: continuationIdentity.continuationKey,
+    });
+    const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
+    const cloudTransport =
+      executionTarget?.enabled === true
+        ? yield* makeCloudExecutionSpawner({
+            cloud: cloudRuntime,
+            localSpawner: spawner,
+            runtimeId: executionTarget.runtimeId,
+            instanceId,
+            environment: processEnv,
+            providerEnvironment: environment,
+            sandboxPrefix: `t3-grok-${instanceId}`,
+          })
+        : undefined;
+    const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+      resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -188,6 +174,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv, Path.Path> 
       environment,
       enabled,
       config,
+      ...(cloudTransport ? { cloudTransport } : {}),
     }).pipe(
       Effect.mapError(
         (cause) =>
@@ -285,5 +272,5 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv, Path.Path> 
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;
-  });
+  }),
 };
