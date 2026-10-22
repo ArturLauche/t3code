@@ -385,6 +385,634 @@ describe("OpenCodeAdapterV2", () => {
       ),
   );
 
+  it.effect("reports the context window of a running OpenCode turn", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "anthropic",
+                  models: {
+                    "claude-sonnet": { limit: { context: 200_000, output: 64_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: {
+              id: "assistant",
+              role: "assistant",
+              time: { created: 2 },
+              parentID: promptId,
+              providerID: "anthropic",
+              modelID: "claude-sonnet",
+              tokens: { input: 1000, output: 200, reasoning: 50, cache: { read: 300, write: 400 } },
+            },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      // The reading lands while the turn runs: the turn's own provider turn
+      // carries it before the turn is over.
+      const live = events.find(
+        (event) =>
+          event.type === "provider_turn.updated" &&
+          event.providerTurn.completedAt === null &&
+          event.providerTurn.tokenUsage !== undefined,
+      );
+      assert.isDefined(live);
+      assert.equal(readings.at(-1)?.usedTokens, 1900);
+      assert.equal(readings.at(-1)?.maxTokens, 200_000);
+      assert.equal(readings.at(-1)?.inputTokens, 1700);
+      assert.equal(readings.at(-1)?.cachedInputTokens, 300);
+      assert.equal(readings.at(-1)?.outputTokens, 200);
+      assert.equal(readings.at(-1)?.reasoningOutputTokens, 50);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("keeps the newest assistant message's context reading", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-newest", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "anthropic",
+                  models: {
+                    "claude-sonnet": { limit: { context: 200_000, output: 64_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      const assistant = (id: string, created: number, input: number) => ({
+        type: "message.updated",
+        properties: {
+          sessionID: "root",
+          info: {
+            id,
+            role: "assistant",
+            time: { created },
+            parentID: promptId,
+            providerID: "anthropic",
+            modelID: "claude-sonnet",
+            tokens: { input, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      });
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      yield* Effect.promise(() => nativeEvents.push(assistant("assistant", 2, 1000)));
+      yield* Effect.promise(() => nativeEvents.push(assistant("assistant-later", 3, 4000)));
+      // A replayed older message must not shrink the reading.
+      yield* Effect.promise(() => nativeEvents.push(assistant("assistant", 2, 1000)));
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      assert.equal(readings.at(-1)?.usedTokens, 4010);
+      assert.equal(readings.at(-1)?.maxTokens, 200_000);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("follows the context as one message runs another step", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-steps", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "anthropic",
+                  models: {
+                    "claude-sonnet": { limit: { context: 200_000, output: 64_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      const assistant = (input: number) => ({
+        type: "message.updated",
+        properties: {
+          sessionID: "root",
+          info: {
+            id: "assistant",
+            role: "assistant",
+            time: { created: 2 },
+            parentID: promptId,
+            providerID: "anthropic",
+            modelID: "claude-sonnet",
+            tokens: { input, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      });
+      yield* Effect.promise(() => nativeEvents.push(assistant(1000)));
+      yield* Effect.promise(() => nativeEvents.push(assistant(5000)));
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      // Every step of the message is published, not only the last one.
+      assert.isTrue(readings.some((usage) => usage.usedTokens === 1100));
+      assert.isTrue(readings.some((usage) => usage.usedTokens === 5100));
+      assert.equal(readings.at(-1)?.usedTokens, 5100);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("reports the context window of the model a turn uses", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-model", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "anthropic",
+                  models: {
+                    "claude-sonnet": { limit: { context: 200_000, output: 64_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async () => ({ data: true }),
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      // The window is what the handoff budget measures against, so it has to
+      // be known before the first turn asks for it.
+      assert.equal(
+        harness.runtime.getModelContextWindow?.({
+          instanceId: ProviderInstanceId.make("opencode-context-window-model"),
+          model: "anthropic/claude-sonnet",
+          options: [],
+        }),
+        200_000,
+      );
+      assert.equal(
+        harness.runtime.getModelContextWindow?.({
+          instanceId: ProviderInstanceId.make("opencode-context-window-model"),
+          model: "anthropic/other-model",
+          options: [],
+        }),
+        undefined,
+      );
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("finds the window of a model T3 configured under another name", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-configured", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "myproxy",
+                  // The configuration names the model, the server reports its
+                  // own id, and OpenCode answers with the latter.
+                  models: {
+                    "vendor/large": { id: "large", limit: { context: 128_000, output: 8_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: {
+              id: "assistant",
+              role: "assistant",
+              time: { created: 2 },
+              parentID: promptId,
+              providerID: "myproxy",
+              modelID: "large",
+              tokens: { input: 1000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      assert.equal(readings.at(-1)?.usedTokens, 1200);
+      assert.equal(readings.at(-1)?.maxTokens, 128_000);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("reads a context whose server left the cache counters out", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-partial", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "anthropic",
+                  models: {
+                    "claude-sonnet": { limit: { context: 200_000, output: 64_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: {
+              id: "assistant",
+              role: "assistant",
+              time: { created: 2 },
+              parentID: promptId,
+              providerID: "anthropic",
+              modelID: "claude-sonnet",
+              tokens: { input: 100, output: 20 },
+            },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      assert.equal(readings.at(-1)?.usedTokens, 120);
+      assert.equal(readings.at(-1)?.maxTokens, 200_000);
+      assert.equal(readings.at(-1)?.cachedInputTokens, 0);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("still reports the context when OpenCode cannot list its providers", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-unreadable", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => {
+            throw new Error("provider list unavailable");
+          },
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: {
+              id: "assistant",
+              role: "assistant",
+              time: { created: 2 },
+              parentID: promptId,
+              providerID: "anthropic",
+              modelID: "claude-sonnet",
+              tokens: { input: 1000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      // The context is still reported, only without the window to measure it against.
+      assert.equal(readings.at(-1)?.usedTokens, 1200);
+      assert.equal(readings.at(-1)?.maxTokens, null);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("leaves the context window of another thread's turn alone", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("context-window-other", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "anthropic",
+                  models: {
+                    "claude-sonnet": { limit: { context: 200_000, output: 64_000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: { id: promptId, role: "user", time: { created: 1 } },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: {
+              id: "other-assistant",
+              role: "assistant",
+              time: { created: 2 },
+              parentID: "another-prompt",
+              providerID: "anthropic",
+              modelID: "claude-sonnet",
+              tokens: { input: 1000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+          },
+        }),
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const readings = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .map((event) => event.providerTurn.tokenUsage)
+        .filter((usage) => usage !== undefined);
+      assert.deepEqual(readings, []);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
   it.effect("preserves native multi-select and custom-answer flags through a live reply", () =>
     Effect.gen(function* () {
       const nativeEvents = asyncEventStream();
