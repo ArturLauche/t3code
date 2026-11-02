@@ -1,3 +1,4 @@
+// @effect-diagnostics effectFnOpportunity:off -- Fork-only adapter predates the Effect.fn lint rule.
 import type { FreebuffSettings, ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -21,10 +22,11 @@ export const resolveFreebuffConfigDir = Effect.fn("resolveFreebuffConfigDir")(fu
   return path.join(input.stateDir, "freebuff", input.instanceId);
 });
 
-export const ensureFreebuffConfigDir = (configDir: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    yield* fileSystem.makeDirectory(configDir, { recursive: true });
-    yield* fileSystem.chmod(configDir, 0o700).pipe(Effect.ignore);
-    return configDir;
-  });
+export const ensureFreebuffConfigDir = Effect.fn("ensureFreebuffConfigDir")(function* (
+  configDir: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem.makeDirectory(configDir, { recursive: true });
+  yield* fileSystem.chmod(configDir, 0o700).pipe(Effect.ignore);
+  return configDir;
+});

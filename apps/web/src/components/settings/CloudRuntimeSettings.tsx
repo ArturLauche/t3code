@@ -172,6 +172,7 @@ export function CloudRuntimeSettings({
     }
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetches runtime health from the server when the environment changes.
   useEffect(() => {
     void refresh();
     return () => {
@@ -381,6 +382,7 @@ export function CloudRuntimeSettings({
               health: {
                 status: config.enabled ? "checking" : "disabled",
                 message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+                // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
                 checkedAt: new Date().toISOString(),
               },
             }
@@ -394,6 +396,7 @@ export function CloudRuntimeSettings({
       health: {
         status: config.enabled ? "checking" : "disabled",
         message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+        // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
         checkedAt: new Date().toISOString(),
       },
       sandboxes: [],

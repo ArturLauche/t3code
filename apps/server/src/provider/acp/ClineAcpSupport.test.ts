@@ -1,11 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import * as EffectAcpErrors from "effect-acp/errors";
 import * as EffectAcpSchema from "effect-acp/compat";
-import * as EffectAcpV2 from "effect-acp/schema";
-import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
   applyClineAcpModelSelection,
@@ -20,9 +17,6 @@ import {
   resolveClineActModeId,
   ClineModelSelectionError,
 } from "./ClineAcpSupport.ts";
-
-const decodeResponse = Schema.decodeUnknownSync(EffectAcpV2.NewSessionResponse);
-const decodeInitialize = Schema.decodeUnknownSync(EffectAcpV2.InitializeResponse);
 
 const CLINE_PROVIDER_OPTION = {
   id: "provider",

@@ -1,15 +1,6 @@
 /**
- * Translation between T3 Code's OpenCode provider settings and OpenCode's own
- * configuration document.
- *
- * T3 Code persists a small, narrowed projection of OpenCode's
- * `provider.<id>` map. This module is the only place that knows how that
- * projection maps onto OpenCode's field names, so the driver, the settings
- * service, and the Settings UI all agree without re-deriving the mapping.
- *
- * OpenCode stays the resolver: T3 Code hands it a config and reads back
- * whatever providers and models it decided to connect. Nothing here predicts
- * or caches that outcome.
+ * Maps T3 Code's narrowed OpenCode provider settings onto OpenCode's own config
+ * document. OpenCode stays the resolver; T3 never predicts what it connects.
  */
 import {
   OPEN_CODE_MAX_ENV_VARS_PER_PROVIDER,
@@ -392,13 +383,8 @@ export function validateOpenCodeBaseUrl(value: string): OpenCodeValidationIssue 
 }
 
 /**
- * Validate a whole provider entry. Returns every issue so the editor can mark
- * each field at once rather than one round-trip per field.
- *
- * The one rule enforced here is the one OpenCode rejects the whole
- * configuration over: `limit` is only valid with both `context` and `output`.
- * Anything OpenCode merely ignores is left to OpenCode's own reporting, so
- * this never turns a working setup into a blocked save.
+ * Validate a whole provider entry and return every issue at once. Only `limit`
+ * with both `context` and `output` is rejected; ignored fields stay OpenCode's.
  */
 export function validateOpenCodeProviderEntry(
   entry: OpenCodeProviderEntry,

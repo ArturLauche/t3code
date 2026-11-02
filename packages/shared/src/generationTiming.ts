@@ -1,14 +1,6 @@
 /**
- * Live output-token rate for a turn that is actively generating assistant
- * tokens. Providers report a cumulative per-response `outputTokens` on each
- * `provider_turn.updated` (#8144), so the rate is the slope of that counter
- * over a short window rather than a whole-turn average.
- *
- * The projection keeps only the latest usage per turn, so samples are pushed in
- * as they are observed and pruned here. Idle gaps (tool execution, waiting on
- * the provider) are excluded from the numerator's time so a slow panel does not
- * drag a fast burst down to a lifetime average, and a counter reset marks a new
- * assistant response rather than negative progress.
+ * Live output-token rate for an actively generating turn, computed as the slope
+ * of the cumulative counter. Idle gaps are excluded and resets start a new response.
  */
 
 /** Rolling window the rate is measured over. Long enough to be stable, short

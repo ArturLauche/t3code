@@ -1,13 +1,6 @@
 /**
- * A `TextGeneration` service for drivers that cannot serve background text
- * generation.
- *
- * Some provider CLIs can only produce text as a full agent turn — an
- * interactive session on the user's own account. Running one to name a commit
- * is wasteful and surprising, so those drivers declare
- * `supportsTextGeneration: false` on their snapshot and hand the registry this
- * stub. Reaching for it anyway is a configuration error with a clear cause
- * rather than a silent fallback to a different provider's model.
+ * TextGeneration stub for drivers that cannot serve background text without a
+ * full interactive turn. Reaching it is a configuration error, not a fallback.
  */
 import { type ProviderDriverKind, TextGenerationError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";

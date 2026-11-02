@@ -229,33 +229,31 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
   });
 
   /**
-   * Execution requires an enabled runtime; sandbox lifecycle does not.
-   *
-   * `enabled` means "do not run turns here", not "forget the account". A
-   * disabled runtime's sandboxes keep billing, and pausing or deleting them is
-   * the only way to stop that, so `listSandboxes` and `sandboxAction` pass
-   * `requireEnabled: false` and keep reaching the vendor.
+   * Execution requires an enabled runtime; sandbox lifecycle does not, so a
+   * disabled runtime can still list, pause, and delete sandboxes that keep billing.
    */
   const requireConfig = (runtimeId: CloudRuntimeId) => resolveConfig(runtimeId);
 
-  const makeVendorFor = (runtimeId: CloudRuntimeId, options?: { requireEnabled?: boolean }) =>
-    Effect.gen(function* () {
-      const { config, apiKey } = yield* resolveConfig(runtimeId, options);
-      if (!apiKey) {
-        return yield* new CloudRuntimeError({
-          runtimeId,
-          operation: "authenticate",
-          reason: "credential_missing",
-          message: "Add an API key for this cloud runtime.",
-        });
-      }
-      const vendor = yield* Effect.try({
-        try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
-        catch: (cause) =>
-          mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
+  const makeVendorFor = Effect.fn("CloudRuntimeService.makeVendorFor")(function* (
+    runtimeId: CloudRuntimeId,
+    options?: { requireEnabled?: boolean },
+  ) {
+    const { config, apiKey } = yield* resolveConfig(runtimeId, options);
+    if (!apiKey) {
+      return yield* new CloudRuntimeError({
+        runtimeId,
+        operation: "authenticate",
+        reason: "credential_missing",
+        message: "Add an API key for this cloud runtime.",
       });
-      return { vendor, apiKey };
+    }
+    const vendor = yield* Effect.try({
+      try: () => makeVendor({ runtimeId, config, apiKey, environmentId }),
+      catch: (cause) =>
+        mapVendorError({ runtimeId, operation: "create-client", cause, secrets: [apiKey] }),
     });
+    return { vendor, apiKey };
+  });
 
   const closeVendor = (vendor: CloudVendorAdapter): Effect.Effect<void> =>
     vendor.close
@@ -783,7 +781,7 @@ export const makeCloudRuntimeService = Effect.fnUntraced(function* (
     sandboxId: string,
     command: CloudCommandSpec,
   ) {
-    const { config, apiKey } = yield* requireConfig(runtimeId);
+    const { apiKey } = yield* requireConfig(runtimeId);
     if (!apiKey) {
       return yield* new CloudRuntimeError({
         runtimeId,

@@ -1,14 +1,7 @@
+// @effect-diagnostics effectFnOpportunity:off -- Fork-only adapter predates the Effect.fn lint rule.
 /**
- * ClineProvider — the status/diagnostic layer for the Cline driver.
- *
- * Cline has no non-interactive "am I signed in" command: `cline auth` and
- * `cline config` both hard-fail without a TTY, and `cline doctor` only reports
- * process health. The only honest signal is the ACP session setup itself, so
- * `checkClineProviderStatus` runs a real, throwaway `cline --acp` session and
- * reads authentication and the model catalog out of its answer. That process is
- * scoped to the check, so a failed probe cannot leak a Cline child.
- *
- * @module provider/Layers/ClineProvider
+ * Cline's status layer: ACP session setup is the only honest auth/model signal,
+ * because `cline auth` and `cline config` need a TTY.
  */
 import {
   type ClineSettings,
@@ -40,7 +33,6 @@ import {
   isCommandMissingCause,
   parseGenericCliVersion,
   spawnAndCollect,
-  type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -95,10 +87,8 @@ const CLINE_PRESENTATION = {
   supportedRuntimeModes: CLINE_SUPPORTED_RUNTIME_MODES as ReadonlyArray<RuntimeMode>,
 } as const;
 
-export function buildInitialClineProviderSnapshot(
-  clineSettings: ClineSettings,
-): Effect.Effect<ServerProviderDraft> {
-  return Effect.gen(function* () {
+export const buildInitialClineProviderSnapshot = Effect.fn("buildInitialClineProviderSnapshot")(
+  function* (clineSettings: ClineSettings) {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
     return buildServerProvider({
       presentation: CLINE_PRESENTATION,
@@ -121,8 +111,8 @@ export function buildInitialClineProviderSnapshot(
             message: "Cline is disabled in T3 Code settings.",
           },
     });
-  });
-}
+  },
+);
 
 /** Cline's advertised models, shaped for the T3 model picker. */
 function clineModelsFromSetup(
@@ -172,21 +162,8 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
       ...(environment ? { environment } : {}),
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
-    // An agent that never answers `initialize` keeps its JSON-RPC request open,
-    // so scope close would wait on a peer that will never speak again. Observe
-    // startup as data and kill the exact child this probe owns when the
-    // deadline passes.
-    //
-    // Forked into this probe's scope rather than detached: the timeout path
-    // terminates the child first, and the scope close that follows is what
-    // releases the fiber. A detached fiber would outlive the probe, so a kill
-    // that fails leaks a fiber and its runtime for the life of the server, once
-    // per status refresh.
-    // Race rather than time out: `Effect.timeoutOption` interrupts the awaited
-    // fiber, and interrupting a startup that is parked on an unanswered
-    // JSON-RPC request tears the runtime down against a peer that will never
-    // answer. Racing leaves `start` alone, so the scope close below still owns
-    // the child and its process group.
+    // The peer may never answer `initialize`, so race startup against the deadline
+    // instead of interrupting it; scope close still owns the child and its group.
     const startOutcome = yield* acp.start().pipe(
       Effect.map((started): StartOutcome => ({
         kind: "ok",
@@ -215,29 +192,28 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
   );
 });
 
-const runClineCliCommand = (
+const runClineCliCommand = Effect.fn("runClineCliCommand")(function* (
   clineSettings: ClineSettings,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv | undefined,
-) =>
-  Effect.gen(function* () {
-    const command = expandHomePath(
-      configuredCommand(clineSettings),
-      yield* HostProcess.HomeDirectory,
-    );
-    const spawnCommand = yield* resolveSpawnCommand(
-      command,
-      args,
-      environment ? { env: environment, extendEnv: true } : {},
-    );
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        ...(environment ? { env: environment, extendEnv: true } : {}),
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
+) {
+  const command = expandHomePath(
+    configuredCommand(clineSettings),
+    yield* HostProcess.HomeDirectory,
+  );
+  const spawnCommand = yield* resolveSpawnCommand(
+    command,
+    args,
+    environment ? { env: environment, extendEnv: true } : {},
+  );
+  return yield* spawnAndCollect(
+    command,
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      ...(environment ? { env: environment, extendEnv: true } : {}),
+      shell: spawnCommand.shell,
+    }),
+  );
+});
 
 export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(function* (
   clineSettings: ClineSettings,

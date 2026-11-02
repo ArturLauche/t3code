@@ -1,17 +1,6 @@
 /**
- * The slice of a remote-execution runtime that a provider driver can reach.
- *
- * Fork addition: the server owns the concrete cloud runtime implementation
- * (sandbox vendors, credential rotation, sandbox retirement), which cannot be
- * imported from a package. This module declares only the capability a driver
- * needs — prepare a workspace once, then start processes inside it — so the
- * driver SPI stays portable while the server keeps the real service.
- *
- * The implementation lives in `@t3tools/cloud-runtime`; its
- * `CloudRuntimeServiceShape` and the transport built by
- * `makeCloudExecutionSpawner` are structurally assignable to these types.
- *
- * @module provider-core/server/cloudExecution
+ * The remote-execution capability a provider driver can reach. The server owns
+ * the concrete runtime; drivers only prepare a workspace and start processes.
  */
 import type { CloudExecutionHandle, CloudRuntimeError, CloudRuntimeId } from "@t3tools/contracts";
 import type * as ChildProcess from "effect/process/ChildProcess";
@@ -92,14 +81,8 @@ export interface CloudExecutionRuntime {
 }
 
 /**
- * How a provider driver runs its agent when the instance points at a cloud
- * sandbox instead of the local machine.
- *
- * Drivers build this once per instance (see `makeCloudExecutionSpawner`) and
- * hand it to the orchestration adapter, which needs exactly two things: a
- * spawner that launches inside the sandbox, and the mapping from a local
- * workspace path to its remote counterpart for the paths that travel in
- * provider protocol messages.
+ * How a driver runs inside a cloud sandbox: a spawner plus local-to-remote path
+ * mapping for paths carried in provider protocol messages.
  */
 export interface CloudExecutionTransport {
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];

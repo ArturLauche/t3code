@@ -1,17 +1,7 @@
 /**
- * Provider capability gating, shared by web and mobile.
- *
- * Some provider CLIs can only honor part of what T3 Code offers — a single
- * approve-everything tool policy, no image ingest, no mid-session mode switch.
- * The server declares that on the `ServerProvider` snapshot
- * (`supportedRuntimeModes`, `supportsImageAttachments`,
- * `supportsFileAttachments`, `showInteractionModeToggle`), and these helpers are
- * the one place clients ask
- * what that means. Keeping them here is the point: a provider-shaped branch in a
- * composer is how capability work turns into scattered `driver === "..."` checks
- * that drift between surfaces.
- *
- * @module shared/providerCapabilities
+ * Provider capability gating shared by web and mobile. The server declares
+ * limits on `ServerProvider`; clients ask these helpers instead of branching on
+ * driver names.
  */
 import type { ProviderInteractionMode, RuntimeMode, ServerProvider } from "@t3tools/contracts";
 
@@ -33,12 +23,8 @@ export type RuntimeModeCapabilitySnapshot = Pick<
 >;
 
 /**
- * Every access mode, in the order the access-mode picker lists them.
- *
- * The `AssertNever` alias below is what keeps this list honest: adding a mode to
- * the contract without listing it here fails to compile, instead of quietly
- * leaving the new mode unavailable on every provider that has not narrowed its
- * own set.
+ * Every access mode in picker order. `AssertNever` below fails compilation when
+ * a contract mode is added without listing it here.
  */
 const RUNTIME_MODE_ORDER = [
   "approval-required",
@@ -83,12 +69,8 @@ export function providerSupportsRuntimeMode(
 }
 
 /**
- * The mode the picker should steer toward: the tightest grant the provider can
- * actually enforce.
- *
- * Deliberately the narrowest, not the widest. Pointing a user at Full access to
- * unblock a send would widen the grant to make the error go away, which is the
- * opposite of what an unsupported-mode warning is for.
+ * The tightest mode the provider can enforce. Deliberately narrow: widening the
+ * grant to unblock a send defeats the warning.
  */
 function narrowestRuntimeMode(supported: ReadonlyArray<RuntimeMode>): RuntimeMode | undefined {
   // `ALL_RUNTIME_MODES` runs narrowest-first, so the first supported entry is
@@ -192,14 +174,8 @@ export interface UnsupportedProviderInput {
 }
 
 /**
- * Single source for the composer's send gate and its banner copy.
- *
- * `capabilityUnknown` is the distinction that matters most here. A provider
- * snapshot that has not loaded is not the same thing as a provider that
- * supports everything, and only the caller knows which it has: the composer
- * blocks on a null provider anyway, so it passes `false`, while a background
- * queue drain — which fires with no composer on screen and no provider picker
- * to consult — must pass `true` rather than assume the permissive default.
+ * Single source for the send gate and banner copy. `capabilityUnknown` separates
+ * an unloaded snapshot from a permissive provider; queue drains pass true.
  */
 export function getUnsupportedProviderInputReason(input: {
   readonly provider: ProviderCapabilitySnapshot | null | undefined;

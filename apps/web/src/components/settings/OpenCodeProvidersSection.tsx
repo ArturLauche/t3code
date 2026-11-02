@@ -393,14 +393,8 @@ interface OpenCodeProvidersSectionProps {
 }
 
 /**
- * OpenCode provider and model management.
- *
- * Everything here becomes OpenCode's own `provider.<id>` configuration. T3
- * Code does not model or proxy these providers: OpenCode resolves them, and a
- * configured model only reaches the model picker once OpenCode reports it as
- * connected. The list therefore reads in two tiers — what T3 Code manages, and
- * what OpenCode already offers — so the user can tell a saved override from a
- * discovered model.
+ * OpenCode provider and model management. Entries become OpenCode's own
+ * `provider.<id>` config; T3 only saves them and reads back what connected.
  */
 export function OpenCodeProvidersSection({
   models,

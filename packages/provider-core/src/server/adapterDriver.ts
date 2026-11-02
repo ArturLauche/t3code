@@ -1,9 +1,6 @@
+import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import type { CloudExecutionTransport } from "./cloudExecution.ts";
-import {
-  ProviderDriverKind,
-  ProviderInstanceId,
-  type ProviderInstanceEnvironment,
-} from "@t3tools/contracts";
+import type { ProviderDriverCreateInput } from "./driver.ts";
 import * as Schema from "effect/Schema";
 import type * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
@@ -24,19 +21,15 @@ export class ProviderAdapterDriverCreateError extends Schema.TaggedError<Provide
   }
 }
 
-export interface ProviderAdapterDriverCreateInput<Config> {
-  readonly instanceId: ProviderInstanceId;
-  readonly displayName: string | undefined;
-  readonly accentColor?: string | undefined;
-  readonly environment: ProviderInstanceEnvironment;
+export interface ProviderAdapterDriverCreateInput<
+  Config,
+> extends ProviderDriverCreateInput<Config> {
   /**
    * Present when the instance targets a cloud sandbox. The provider driver
    * owns building it — only the driver knows the runtime's credentials — and
    * hands the adapter the spawner plus the local-to-remote cwd mapping.
    */
   readonly cloudTransport?: CloudExecutionTransport;
-  readonly enabled: boolean;
-  readonly config: Config;
 }
 
 export interface ProviderAdapterDriver<Config, R = never> {

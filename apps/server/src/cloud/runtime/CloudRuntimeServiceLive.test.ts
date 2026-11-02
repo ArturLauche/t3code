@@ -299,7 +299,7 @@ describe("CloudRuntimeServiceLive", () => {
         }),
       );
       yield* service.setCredential({ runtimeId, apiKey: "secret-api-key" });
-      const handle = yield* service.prepareExecution({
+      yield* service.prepareExecution({
         runtimeId,
         name: "T3 sandbox",
         metadata: { t3ProviderInstanceId: "provider-1" },

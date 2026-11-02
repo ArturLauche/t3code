@@ -5,12 +5,8 @@ export const cloudRuntimeCredentialName = (runtimeId: CloudRuntimeId): string =>
   `cloud-runtime-${Buffer.from(runtimeId, "utf8").toString("base64url")}`;
 
 /**
- * Whether one stored credential may keep serving the same runtime.
- *
- * The credential belongs to one vendor account at one endpoint, so the vendor
- * kind, the API domain, any custom endpoint and the region are all part of its
- * scope. Changing any of them points the runtime at a different destination,
- * and sending the previous account's key there would leak it.
+ * Whether a stored credential still serves the same runtime. Vendor, endpoint,
+ * and region are part of its scope; any change would leak the old account's key.
  */
 export const sameCloudCredentialScope = (
   previous: CloudRuntimeConfig,
@@ -22,15 +18,8 @@ export const sameCloudCredentialScope = (
   (previous.region ?? null) === (next.region ?? null);
 
 /**
- * Runtime ids whose stored credential stopped belonging to them between two
- * settings snapshots.
- *
- * Both a removed runtime and a repointed one are stale for the same reason: the
- * key either has no configuration left, or its configuration now names a
- * different account. Settings reaches this through the update transaction and
- * through hand edits of `settings.json`, and both have to agree, or a reload
- * would leave the previous vendor's key in the store and ready to be sent to
- * the new one.
+ * Runtime ids whose credential stopped matching between settings snapshots,
+ * whether removed or repointed, so the old key is not sent to the new vendor.
  */
 export const staleCloudCredentialIds = (
   previous: ServerSettings["cloudRuntimeInstances"],

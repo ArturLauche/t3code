@@ -1,31 +1,6 @@
 /**
- * ClineAcpSupport — everything provider-specific about driving Cline over ACP.
- *
- * Cline speaks ACP through `cline --acp`, a newline-delimited JSON-RPC 2.0
- * stdio server. Three traits of that build shape this module:
- *
- * 1. **Authentication is never requested.** Cline's ACP `authenticate` starts a
- *    device-code OAuth flow: it prints a URL to stderr, tries to open a browser,
- *    and then blocks forever waiting for the user. On a T3 server that browser
- *    opens on the wrong machine, so `makeClineAcpRuntime` deliberately omits
- *    `authMethodId` and lets session setup reveal an unauthenticated CLI through
- *    its `-32000` error instead. See `classifyClineAuthFailure`.
- *
- * 2. **The model catalog arrives in session setup, not `initialize`.**
- *    `session/new` returns both an unstable `models` object and a `model` select
- *    inside `configOptions`. `AcpRuntimeModel.extractModelConfigId` picks the
- *    first option with `category: "model"`, which for Cline is the *provider*
- *    picker — so Cline resolves its own option id rather than trusting that
- *    helper. See `findClineModelConfigOption`.
- *
- * 3. **Tool approval has exactly one knob.** Cline exposes a single
- *    `auto_approve` boolean; it has no per-tool policies and no middle ground
- *    between "ask about everything" and "approve everything". T3's
- *    `approval-required` and `full-access` modes map onto those two states and
- *    the two in-between modes are declared unsupported, so T3 never promises a
- *    narrower grant than Cline will enforce.
- *
- * @module provider/acp/ClineAcpSupport
+ * Cline over ACP: never call `authenticate` (it opens a browser and blocks),
+ * read models from session setup, and map approval to the one `auto_approve` knob.
  */
 import { type ClineSettings, type RuntimeMode } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -171,12 +146,8 @@ function clineModelSelectValues(
 }
 
 /**
- * Resolves the config option that selects a Cline model.
- *
- * Cline tags its *provider* picker with `category: "model"` too and lists it
- * first, so the shared `extractModelConfigId` resolves to `"provider"` and
- * `session/set_config_option` would change accounts instead of models. Prefer
- * the literal `model` id and never fall back to the provider picker.
+ * Resolve Cline's model option: it tags the provider picker `category: "model"`
+ * too, so prefer the literal `model` id and never fall back to the provider.
  */
 export function findClineModelConfigOption(
   configOptions: ReadonlyArray<AcpCompat.SessionConfigOption> | null | undefined,
@@ -212,14 +183,8 @@ export function currentClineModelIdFromSessionSetup(
 }
 
 /**
- * Flattens Cline's advertised catalog into T3 models. Grouped and flat selects
- * are both handled, and blanks and duplicates are dropped.
- *
- * At most one entry is marked default, and only when the session's current
- * selection is actually in the catalog. A current model that is not advertised
- * leaves every entry unmarked rather than promoting an arbitrary one: the
- * session's own choice is not ours to second-guess, and a wrong default would
- * silently pin the thread to a model the user did not pick.
+ * Flatten Cline's catalog, dropping blanks and duplicates. Mark a default only
+ * when the session's current model is advertised; never promote an arbitrary one.
  */
 export function clineModelsFromSessionSetup(
   sessionSetupResult: ClineSessionSetupResult,
@@ -261,14 +226,8 @@ export class ClineModelSelectionError extends Schema.TaggedError<ClineModelSelec
 }
 
 /**
- * Applies a requested model through the option Cline actually advertised.
- *
- * A selection outside the advertised catalog is rejected instead of forwarded:
- * `session/set_model` accepts any string on this build, so an unchecked slug
- * would silently pin the session to a model Cline never offered.
- *
- * The value written back is the advertised entry verbatim, not the trimmed
- * request, because the runtime validates it against the advertised set.
+ * Apply a model only through an advertised option; this build accepts any string
+ * on `session/set_model`, so an unchecked slug would silently pin the session.
  */
 export const applyClineAcpModelSelection = Effect.fn("applyClineAcpModelSelection")(
   function* (input: {
@@ -415,23 +374,8 @@ function defectMessages(cause: Cause.Cause<unknown>): ReadonlyArray<string> {
 }
 
 /**
- * Every message that could be Cline's auth guard, with the shape-specific
- * precision already applied.
- *
- * The verified shape is a typed `AcpRequestError`: against Cline 3.0.65 an
- * unauthenticated CLI answers `session/new` with a well-formed
- * `-32000 {"message":"Authentication required: Call authenticate before starting
- * a session"}`. The method and the `-32000` code both have to line up, because
- * `-32000` is generic and an unrelated one must not read as a sign-in problem.
- *
- * The other two are defensive, for builds that give up earlier and never
- * produce that response at all:
- *
- * - A typed `AcpProcessExitedError`. A CLI that prints the guard to stderr and
- *   exits without answering yields no request error, so only the captured stderr
- *   counts — the wrapper's own "ACP process exited" text says nothing about why.
- * - A thrown defect, whose message is the last text left when a failure never
- *   becomes a typed error.
+ * Every shape that can mean Cline's auth guard: a typed `-32000` request error,
+ * a process exit with guard text on stderr, or a thrown defect.
  */
 function clineAuthCandidateMessages(
   cause: Cause.Cause<EffectAcpErrors.AcpError>,
@@ -458,13 +402,8 @@ function clineAuthCandidateMessages(
 }
 
 /**
- * Splits "Cline is not signed in" from "Cline is broken" so Settings can offer
- * `cline auth` instead of a support ticket. See
- * {@link clineAuthCandidateMessages} for the shapes this recognizes.
- *
- * The startup guard is applied to every shape, not just the ones that carry
- * only a message: a broken `PATH` can also mention the API key, and that CLI
- * still needs installing rather than signing in.
+ * Split "not signed in" from "broken" so Settings can offer `cline auth`. The
+ * startup guard applies to every shape, including ones that only carry a message.
  */
 export function classifyClineAuthFailure(
   cause: Cause.Cause<EffectAcpErrors.AcpError>,
