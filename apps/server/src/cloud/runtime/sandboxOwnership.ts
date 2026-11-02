@@ -1,12 +1,8 @@
 import type { CloudRuntimeId, CloudSandboxSummary } from "@t3tools/contracts";
 
 /**
- * Whether a vendor sandbox is one this environment created for this runtime.
- *
- * Ownership is proven by metadata the server stamped on create and read back
- * from the vendor, never by anything a client sent: a client can ask for a
- * sandbox id, but the vendor account can legitimately be shared between T3
- * environments, and the environment id is what separates them.
+ * Whether a vendor sandbox belongs to this environment and runtime, proven only
+ * by server-stamped metadata because vendor accounts can be shared.
  */
 export const isManagedSandbox = (
   sandbox: CloudSandboxSummary,

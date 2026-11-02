@@ -13,7 +13,9 @@ export function materializeReplayTranscriptRuntimeInstructions(
         ? "Grok"
         : runtime.driver === "acpRegistry"
           ? "acpRegistry"
-          : undefined;
+          : runtime.driver === "fx"
+            ? "fx"
+            : undefined;
   if (harness === undefined) return transcript;
   // Both harnesses register T3 Code's MCP server for the session, so the
   // adapter tells the model about the MCP tooling and the expected outbound

@@ -1,14 +1,6 @@
 /**
- * Freebuff's terminal screen protocol.
- *
- * Freebuff ships no machine protocol: T3 spawns the CLI on a PTY and
- * reconstructs what happened from the rendered screen. Every rule that answers
- * "which screen is this?" and "which lines are the assistant's answer?" lives
- * here, away from the transport that owns the process, so the classifier and the
- * extractor can be exercised against captured screens alone.
- *
- * `provider/Layers/freebuffScreens.ts` holds the captured 0.1.6 output these
- * patterns were written against.
+ * Freebuff's screen protocol: rules for classifying the rendered TUI and
+ * extracting the assistant's answer, kept separate from the PTY transport.
  */
 const TERMINAL_COLUMNS = 160;
 const TERMINAL_ROWS = 48;
@@ -59,14 +51,8 @@ const stripTerminalBorder = (line: string): string => {
 };
 
 /**
- * Chrome the unauthenticated CLI renders on its own.
- *
- * Every pattern is anchored to the whole line with an optional trailing
- * punctuation suffix. That is what the real TUI emits — `Open this URL in your
- * browser to login:` and `Waiting for login...` on 0.1.6 — and anchoring is
- * also what keeps a turn about authentication from failing: a user's prompt or
- * an answer that happens to mention signing in is part of the conversation, not
- * an overlay. See `freebuffScreens.ts` for the captured output.
+ * Chrome the unauthenticated CLI renders. Patterns are whole-line anchored so a
+ * conversation that mentions signing in is not mistaken for an overlay.
  */
 const AUTHENTICATION_SCREEN_PATTERNS = [
   /^\s*press\s+enter\s+to\s+login\b[^a-z]*$/iu,

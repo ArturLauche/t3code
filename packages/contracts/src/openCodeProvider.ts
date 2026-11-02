@@ -1,16 +1,6 @@
 /**
- * User-supplied OpenCode provider and model configuration.
- *
- * These schemas are a faithful, narrowed projection of OpenCode's own
- * `provider.<id>` config (`Config.provider` in the OpenCode schema). T3 Code
- * does not invent a second configuration language: entries written here are
- * serialized into the same JSON shape OpenCode reads from
- * `OPENCODE_CONFIG_CONTENT`, and OpenCode remains the component that resolves
- * providers, loads their `@ai-sdk/*` packages, and reports which models are
- * connected. T3 Code only persists the entries and re-probes.
- *
- * Field names follow OpenCode's camelCase (`baseUrl` → `options.baseURL`,
- * `toolCall` → `tool_call`) so the mapping stays obvious against upstream.
+ * User-supplied OpenCode provider/model configuration: a narrowed projection of
+ * OpenCode's `provider.<id>` schema that serializes into OPENCODE_CONFIG_CONTENT.
  */
 import * as Schema from "effect/Schema";
 
@@ -61,14 +51,8 @@ export const OpenCodeEnvironmentVariableName = TrimmedNonEmptyString.check(
 export type OpenCodeEnvironmentVariableName = typeof OpenCodeEnvironmentVariableName.Type;
 
 /**
- * One user-declared model inside a provider entry. Mirrors OpenCode's
- * `provider.<id>.models.<modelId>`: an entry with no other fields set is
- * already meaningful to OpenCode ("this model exists on this provider"), so
- * every other field is optional.
- *
- * Models are stored as an ordered list rather than OpenCode's object map
- * because T3 Code edits them positionally; `modelId` is the map key that
- * serialization writes.
+ * One user-declared model inside a provider entry, mirroring
+ * `provider.<id>.models.<modelId>`; all fields are optional.
  */
 export const OpenCodeProviderModelSetting = Schema.Struct({
   modelId: OpenCodeModelId,

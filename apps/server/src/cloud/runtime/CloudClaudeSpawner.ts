@@ -1,12 +1,6 @@
 /**
- * Claude-specific bridge from the cloud execution transport to the Claude
- * Agent SDK's synchronous spawn hook.
- *
- * The SDK never asks a spawner for a handle; it calls `spawnClaudeCodeProcess`
- * and expects a `SpawnedProcess` synchronously. `DeferredCloudExecutionProcess` supplies
- * that shape while the remote start resolves asynchronously.
- *
- * @module cloud/runtime/CloudClaudeSpawner
+ * Bridges the async cloud execution transport to the Claude Agent SDK's
+ * synchronous `spawnClaudeCodeProcess` hook.
  */
 // @effect-diagnostics nodeBuiltinImport:off - Bridges the Claude Agent SDK's
 // synchronous spawn hook to the cloud transport; both boundaries are Node streams.

@@ -1,15 +1,6 @@
 /**
- * Opt-in probe against the real Cline CLI.
- *
- * Skipped unless `T3_CLINE_ACP_PROBE=1`. Two things to know before enabling it:
- *
- * - `cline --acp` needs credentials before `session/new`. Sign in with
- *   `cline auth` first, or export `CLINE_API_KEY`. T3 Code deliberately never
- *   calls ACP `authenticate` itself, because Cline's implementation starts a
- *   device-code OAuth flow, prints the URL to stderr and then blocks — on a
- *   server that browser opens on the wrong machine.
- * - The probe reads the advertised model catalog and switches to a model that
- *   is already current, so it costs nothing and changes no account state.
+ * Opt-in probe against the real Cline CLI (`T3_CLINE_ACP_PROBE=1`). Sign in with
+ * `cline auth` or `CLINE_API_KEY`; the probe never calls ACP `authenticate`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";

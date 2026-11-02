@@ -1,14 +1,6 @@
 /**
- * Retires cloud sandboxes whose runtime stopped pointing at the account that
- * created them.
- *
- * Deleting a runtime, or repointing one at another vendor, endpoint or region,
- * moves the runtime somewhere its stored credential no longer works. The
- * sandboxes created under the previous identity keep billing and become
- * unreachable from T3: the adapter can only list the new account, and the
- * credential that owned them is removed by the settings layer on the same
- * transition. Watching that transition here — with the previous identity
- * still in hand — is the only point where they can still be deleted.
+ * Retires sandboxes left on a runtime's previous vendor account after the
+ * runtime is deleted or repointed; that transition is the last chance to delete.
  */
 import {
   CloudRuntimeId,
@@ -53,12 +45,8 @@ export interface CloudSandboxRetirementDependencies {
   }) => CloudVendorAdapter;
 }
 
-const deleteSandboxes = (
-  runtimeId: CloudRuntimeId,
-  vendor: CloudVendorAdapter,
-  environmentId: string,
-) =>
-  Effect.gen(function* () {
+const deleteSandboxes = Effect.fn("deleteSandboxes")(
+  function* (runtimeId: CloudRuntimeId, vendor: CloudVendorAdapter, environmentId: string) {
     const sandboxes: ReadonlyArray<CloudSandboxSummary> = yield* Effect.promise(() =>
       vendor.listSandboxes(),
     );
@@ -76,11 +64,14 @@ const deleteSandboxes = (
         ),
       );
     }
-  }).pipe(
-    Effect.ensuring(
-      vendor.close ? Effect.promise(() => vendor.close!()).pipe(Effect.ignore) : Effect.void,
+  },
+  (effect, _runtimeId, vendor) =>
+    effect.pipe(
+      Effect.ensuring(
+        vendor.close ? Effect.promise(() => vendor.close!()).pipe(Effect.ignore) : Effect.void,
+      ),
     ),
-  );
+);
 
 /**
  * Deletes the sandboxes of every runtime that disappeared or was repointed

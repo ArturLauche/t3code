@@ -1,10 +1,10 @@
+// @effect-diagnostics effectFnOpportunity:off -- Fork-only adapter predates the Effect.fn lint rule.
 import {
   ClineSettings,
   ProviderDriverKind,
   type OrchestrationV2ProviderCapabilities,
   type ProviderApprovalOption,
   type ProviderInstanceId,
-  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
@@ -21,10 +21,8 @@ import type { CloudExecutionCwdResolver } from "@t3tools/provider-core/server/cl
 import * as ServerConfig from "../../config.ts";
 import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
-import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   applyClineAcpModelSelection,
-  CLINE_SUPPORTED_RUNTIME_MODES,
   clineSupportsRuntimeMode,
   makeClineAcpRuntime,
   resolveClineActModeId,
@@ -35,7 +33,6 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -50,20 +47,14 @@ import {
   type AcpAdapterV2RuntimeInput,
 } from "@t3tools/provider-acp/server/adapter";
 
-export const CLINE_PROVIDER = ProviderDriverKind.make("cline");
+const CLINE_PROVIDER = ProviderDriverKind.make("cline");
 const CLINE_DRIVER_KIND = CLINE_PROVIDER;
 const DEFAULT_CLINE_SETTINGS = Schema.decodeSync(ClineSettings)({});
+const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
 /**
- * What Cline actually supports, rather than what ACP allows in general:
- *
- * - No conversation rollback. The CLI keeps no transcript T3 could truncate,
- *   so `canRollbackThread` is off and a checkpoint restores files only.
- * - The model travels as a session config option, so it is switchable in
- *   session even though `supportsRuntimeModeSwitchInSession` is not: approval
- *   is fixed by the launch-time `auto_approve` boolean.
- * - No MCP tools. `--acp` accepts `mcpServers` and never connects them, so the
- *   runtime instructions must not tell Cline to call them.
+ * Cline's real capabilities: no rollback (no transcript), model switching via
+ * session config, and no MCP tools because `--acp` never connects them.
  */
 const ClineProviderCapabilitiesV2 = {
   ...AcpProviderCapabilitiesV2,
@@ -136,7 +127,7 @@ export interface ClineAdapterV2Options {
   readonly makeRuntime?: AcpAdapterV2Flavor["makeRuntime"];
 }
 
-export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAdapterV2Flavor {
+function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAdapterV2Flavor {
   const clineSettings: ClineAcpRuntimeClineSettings = {
     binaryPath: options.settings.binaryPath,
     dataDir: options.settings.dataDir,
@@ -164,12 +155,12 @@ export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAd
     promptFailure: (cause) =>
       makeProviderFailure({
         cause,
-        message: Schema.is(EffectAcpErrors.AcpRequestError)(cause) ? cause.errorMessage : undefined,
+        message: isAcpRequestError(cause) ? cause.errorMessage : undefined,
         class: "provider_error",
       }),
     resolveModelId: (selection) => selection.model,
-    applyModelSelection: ({ runtime, modelSelection }) =>
-      Effect.gen(function* () {
+    applyModelSelection: Effect.fn("ClineAdapterV2.applyModelSelection")(
+      function* ({ runtime, modelSelection }) {
         // Cline can be left in Plan mode by the user switching inside its own
         // TUI, so re-select Act on every session setup and every turn's
         // reconfiguration. `resolveClineActModeId` returns the advertised id.
@@ -183,17 +174,20 @@ export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAd
           mapError: (cause) => cause,
         });
         return modelSelection.model;
-      }).pipe(
-        Effect.mapError(
-          (cause): EffectAcpErrors.AcpError =>
-            new EffectAcpErrors.AcpTransportError({
-              // A model Cline never advertised is a refusal, not a crash: the
-              // CLI would otherwise accept any slug and pin the session to it.
-              detail: cause.message,
-              cause,
-            }),
+      },
+      (effect) =>
+        effect.pipe(
+          Effect.mapError(
+            (cause): EffectAcpErrors.AcpError =>
+              new EffectAcpErrors.AcpTransportError({
+                // A model Cline never advertised is a refusal, not a crash: the
+                // CLI would otherwise accept any slug and pin the session to it.
+                detail: cause.message,
+                cause,
+              }),
+          ),
         ),
-      ),
+    ),
     makeRuntime:
       options.makeRuntime ??
       ((input: AcpAdapterV2RuntimeInput) => {
@@ -211,7 +205,7 @@ export function makeClineAcpAdapterFlavor(options: ClineAdapterV2Options): AcpAd
   };
 }
 
-export const makeClineAdapterV2 = Effect.fn("makeClineAdapterV2")(function* (
+const makeClineAdapterV2 = Effect.fn("makeClineAdapterV2")(function* (
   options: ClineAdapterV2Options,
 ) {
   return yield* makeAcpAdapterV2({
@@ -290,5 +284,3 @@ export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAda
       ),
   ),
 };
-
-export { CLINE_SUPPORTED_RUNTIME_MODES };

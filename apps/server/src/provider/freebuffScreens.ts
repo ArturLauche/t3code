@@ -1,16 +1,6 @@
 /**
- * Screens captured from the real Freebuff CLI, used to keep the screen
- * classifier honest against the TUI it actually has to read.
- *
- * Captured on Freebuff 0.1.6 in a 160x48 terminal through the same PTY and
- * headless-terminal path the adapter uses. They record what the CLI renders
- * today, not what any release is promised to render: Freebuff's TUI is not a
- * stable protocol, and the provider is marked `uncharacterized` in the model
- * manifest for exactly that reason. A change in the real CLI shows up here as a
- * failing fixture rather than as a user staring at a timeout.
- *
- * Login URLs are redacted; the one-time codes they carry are single-use and not
- * worth persisting.
+ * Screens captured from Freebuff 0.1.6 through the adapter's PTY path, so the
+ * classifier is tested against the TUI it reads. Login URLs are redacted.
  */
 const INDENT = " ".repeat(48);
 

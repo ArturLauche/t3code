@@ -216,17 +216,21 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
     [environmentId, listRuntimes],
   );
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Switching environments clears per-environment editor state.
   useEffect(() => {
     // Runtime ids are only unique within an environment. Never carry a key
     // or health snapshot from the previously selected environment.
     refreshGeneration.current += 1;
+    // oxlint-disable-next-line react/set-state-in-effect -- Environment switch resets every draft held for the previous environment.
     setRuntimes([]);
     setApiKeys({});
     setApiUrlDrafts({});
     setSetupCommandDrafts({});
     setBusyId(null);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- environmentId is the reset key; the body only touches stable setters.
   }, [environmentId]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Loads runtime health from the server for the selected environment.
   useEffect(() => {
     if (environmentId === undefined) return;
     let cancelled = false;
@@ -253,6 +257,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   health: {
                     status: config.enabled ? "checking" : "disabled",
                     message: config.enabled ? "Checking…" : "Disabled",
+                    // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
                     checkedAt: new Date().toISOString(),
                   },
                 }
@@ -266,6 +271,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
           health: {
             status: config.enabled ? "checking" : "disabled",
             message: config.enabled ? "Checking…" : "Disabled",
+            // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
             checkedAt: new Date().toISOString(),
           },
           sandboxes: [],

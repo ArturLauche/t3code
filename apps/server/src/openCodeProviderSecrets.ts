@@ -1,12 +1,6 @@
 /**
- * Secret handling for user-supplied OpenCode provider API keys.
- *
- * The provider map lives inside `providerInstances[id].config`, which is an
- * opaque blob: every helper here narrows that blob instead of assuming the
- * driver decoded it. The stored shape follows the existing provider
- * environment convention — an `apiKeyRedacted: true` marker in settings.json
- * with the real value in the secret store — so a client that reads settings,
- * writes them back unchanged, never sees or clobbers a key.
+ * Secret handling for OpenCode provider API keys stored in the opaque
+ * `providerInstances[id].config` blob, using the usual redaction convention.
  */
 export interface OpenCodeProviderApiKeyRef {
   readonly providerId: string;

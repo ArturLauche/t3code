@@ -11,11 +11,8 @@ import {
 import { ComposerBanner } from "./ComposerBanner";
 
 /**
- * Live output tokens-per-second for the active turn, shown while the agent is
- * generating. Mirrors AgentElapsed: the registry is polled on a short timer and
- * the value is written straight to the text node, so streaming tokens cause no
- * React commits on the composer. The number freezes on its last value during a
- * tool call, and the whole row disappears once the turn is no longer running.
+ * Live output tokens-per-second for the active turn. Polls outside React and
+ * writes the text node directly, so streaming tokens cause no composer commits.
  */
 export function ComposerStreamingTps({
   active,
@@ -27,6 +24,7 @@ export function ComposerStreamingTps({
 }) {
   const valueRef = useRef<HTMLSpanElement>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Polls the TPS registry on a timer while the turn streams.
   useEffect(() => {
     if (!active || threadRef === null) {
       if (valueRef.current) valueRef.current.textContent = "";

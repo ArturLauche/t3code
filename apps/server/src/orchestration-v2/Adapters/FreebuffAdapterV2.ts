@@ -1,3 +1,5 @@
+// @effect-diagnostics effectFnOpportunity:off -- Fork-only adapter predates the Effect.fn lint rule.
+/* oxlint-disable t3code/prefer-effect-fn -- Local terminal helpers are closures; the adapter methods carry the spans. */
 import XtermHeadless from "@xterm/headless";
 import {
   FREEBUFF_DEFAULT_MODEL,
@@ -7,7 +9,6 @@ import {
   type OrchestrationV2ProviderSession,
   type ProviderInstanceId,
   type ProviderTurnId,
-  type ThreadId,
 } from "@t3tools/contracts";
 import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -45,7 +46,6 @@ import {
   TERMINAL_SCROLLBACK,
   terminalText,
   type FreebuffScreenState,
-  type XtermTerminal,
 } from "./FreebuffScreen.ts";
 
 const { Terminal } = XtermHeadless as unknown as {
@@ -64,15 +64,10 @@ const MAX_RETAINED_TURNS = 100;
 const ESC = "\u001b";
 
 /**
- * What the terminal bridge can actually do.
- *
- * One terminal is one conversation, so a session hosts a single provider thread
- * and cannot switch models: Freebuff picks its model inside the TUI and T3 keeps
- * one opaque alias. There is no transcript to truncate, so neither rollback nor a
- * conversation snapshot is available, and a screen carries no tool or subagent
- * structure — only the assistant's rendered text.
+ * Terminal bridge capabilities: one terminal is one conversation and one opaque
+ * model, with no transcript rollback and no tool/subagent structure.
  */
-export const FreebuffProviderCapabilitiesV2 = {
+const FreebuffProviderCapabilitiesV2 = {
   sessions: {
     supportsMultipleProviderThreadsPerSession: false,
     supportsModelSwitchInSession: false,
@@ -654,12 +649,8 @@ export function makeFreebuffAdapterV2(
         operationLock.withPermits(1)(
           Effect.gen(function* () {
             if (stoppedFlag) return;
-            // Classification reads the event, which between a PTY write and the
-            // terminal's parse callback is the raw chunk and so the freshest
-            // view of the screen. Text is only ever taken from the rendered
-            // screen: a raw chunk can match a gate pattern inside a partially
-            // painted line, and treating that as the screen would publish the
-            // terminal's own control sequences as the assistant's answer.
+            // Classify the parsed screen, never a raw chunk: a partial line can
+            // match a gate pattern and leak control sequences as the answer.
             const eventState = classifyFreebuffScreen(screenTail(rawScreen));
             const currentScreen = renderedScreen;
             const now = yield* Clock.currentTimeMillis;
