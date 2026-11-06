@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ServerConfig } from "../config.ts";
@@ -75,7 +76,7 @@ const scopedTempPath = (prefix: string, fileName: string) =>
 
 const checkLayer = it.layer(
   ServerConfig.layerTest(process.cwd(), { prefix: "t3code-cline-provider-test-" }).pipe(
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, SecureRandom.layerWebCrypto)),
   ),
 );
 

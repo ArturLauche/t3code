@@ -923,6 +923,22 @@
     },
     {
       "name": "@connectrpc/connect",
+      "version": "2.3.0",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0",
+        "copyrights": ["Copyright 2021-2026 The Connect Authors"]
+      }
+    },
+    {
+      "name": "@connectrpc/connect-web",
+      "version": "2.3.0",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0",
+        "copyrights": ["Copyright 2021-2026 The Connect Authors"]
+      }
+    },
+    {
+      "name": "@connectrpc/connect",
       "version": "2.2.0",
       "generatedNotice": {
         "licenseId": "Apache-2.0",

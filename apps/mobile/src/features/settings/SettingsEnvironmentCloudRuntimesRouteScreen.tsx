@@ -14,8 +14,8 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
-  AndroidSettingsEnvironmentFilter,
   SettingsEnvironmentFilterHeader,
+  useSettingsEnvironmentMenu,
 } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsSection } from "./components/SettingsSection";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
@@ -119,6 +119,7 @@ function healthText(runtime: CloudRuntimeInstance): string {
 
 export function SettingsEnvironmentCloudRuntimesRouteScreen() {
   const insets = useSafeAreaInsets();
+  const environmentMenu = useSettingsEnvironmentMenu();
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
   const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
   const targets = resolveMobileSettingsTargets(
@@ -133,7 +134,7 @@ export function SettingsEnvironmentCloudRuntimesRouteScreen() {
   return (
     <>
       <SettingsEnvironmentFilterHeader />
-      <SettingsScreen title="Cloud runtimes" trailing={<AndroidSettingsEnvironmentFilter />}>
+      <SettingsScreen title="Cloud runtimes" menus={[environmentMenu]}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
@@ -340,32 +341,35 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
         await clearCredential({ environmentId, input: { runtimeId: id } });
       } catch {
         // The settings update below also removes stale credentials server-side.
-      } finally {
-        void updateSettings({
-          environmentId,
-          input: { patch: { cloudRuntimeInstances: { [id]: null } } },
-        });
-        setApiKeys((current) => {
-          const copy = { ...current };
-          delete copy[id];
-          return copy;
-        });
-        // A re-added runtime must not inherit an endpoint or a setup-command
-        // draft from the one that was just removed.
-        discardDraft(setApiUrlDrafts, id);
-        discardDraft(setSetupCommandDrafts, id);
-        setBusyId(null);
       }
+      void updateSettings({
+        environmentId,
+        input: { patch: { cloudRuntimeInstances: { [id]: null } } },
+      });
+      setApiKeys((current) => {
+        const copy = { ...current };
+        delete copy[id];
+        return copy;
+      });
+      // A re-added runtime must not inherit an endpoint or a setup-command
+      // draft from the one that was just removed.
+      discardDraft(setApiUrlDrafts, id);
+      discardDraft(setSetupCommandDrafts, id);
+      setBusyId(null);
     })();
   };
 
   const run = async (id: CloudRuntimeId, action: () => Promise<unknown>) => {
     setBusyId(id);
-    try {
-      await action();
-    } finally {
-      setBusyId((current) => (current === id ? null : current));
-    }
+    await action().then(
+      () => {
+        setBusyId((current) => (current === id ? null : current));
+      },
+      (error: unknown) => {
+        setBusyId((current) => (current === id ? null : current));
+        throw error;
+      },
+    );
   };
 
   /**

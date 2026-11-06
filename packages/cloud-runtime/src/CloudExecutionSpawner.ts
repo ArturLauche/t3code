@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
+import * as Redacted from "effect/Redacted";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -297,10 +298,16 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
     const handle = yield* prepareFor(cwd);
     const remoteHome =
       handle.remoteHome ?? `/tmp/t3-home-${handle.sandboxId.replaceAll(/[^a-zA-Z0-9_-]/gu, "-")}`;
+    const commandEnvironment = Object.fromEntries(
+      Object.entries(command.options.env ?? {}).map(([name, value]) => [
+        name,
+        value === undefined ? undefined : typeof value === "string" ? value : Redacted.value(value),
+      ]),
+    );
     const environment = {
       ...makeCloudEnvironment({
         base: input.environment,
-        command: command.options.env ?? {},
+        command: commandEnvironment,
         providerEnvironment: input.providerEnvironment,
       }),
       T3_CLOUD_EXECUTION: "1",
@@ -310,9 +317,10 @@ export const makeCloudExecutionSpawner = Effect.fn("makeCloudExecutionSpawner")(
       CODEX_HOME: `${remoteHome}/.codex`,
       FREEBUFF_CONFIG_DIR: `${remoteHome}/.freebuff`,
     };
-    const remoteArgs = command.args.map((argument) =>
-      argument === cwd ? handle.remoteCwd : argument,
-    );
+    const remoteArgs = command.args.map((argument) => {
+      const value = typeof argument === "string" ? argument : Redacted.value(argument);
+      return value === cwd ? handle.remoteCwd : value;
+    });
     const cloudProcess = yield* input.cloud
       .startProcess(handle.runtimeId, handle.sandboxId, {
         command: remoteCommandName(command.command),

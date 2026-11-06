@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
@@ -114,7 +114,6 @@ export interface ClineAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClineSettings;
   readonly environment: NodeJS.ProcessEnv;
-  readonly crypto: Crypto.Crypto;
   readonly fileSystem: FileSystem.FileSystem;
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly selfInvocation: SelfInvocation;
@@ -225,7 +224,7 @@ const makeClineAdapterV2 = Effect.fn("makeClineAdapterV2")(function* (
 
 export type ClineAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
   | McpProviderSessions.McpProviderSessions
@@ -242,7 +241,6 @@ export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAda
     function* (input: ProviderAdapterDriverCreateInput<ClineSettings>) {
       const hostEnvironment = yield* HostProcess.Environment;
       const localChildProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
@@ -254,7 +252,6 @@ export const ClineAdapterV2Driver: ProviderAdapterDriver<ClineSettings, ClineAda
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
         environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
-        crypto,
         fileSystem,
         idAllocator,
         selfInvocation,

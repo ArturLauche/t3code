@@ -20,7 +20,7 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import {
   CLINE_SUPPORTED_RUNTIME_MODES,
@@ -151,7 +151,7 @@ const discoverClineModelsViaAcp = Effect.fn("discoverClineModelsViaAcp")(functio
 ): Effect.fn.Return<
   ClineAcpDiscovery,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
+  ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom
 > {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* Effect.gen(function* () {
