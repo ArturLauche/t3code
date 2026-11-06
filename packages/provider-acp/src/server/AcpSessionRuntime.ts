@@ -124,6 +124,7 @@ export interface AcpSessionRuntimeOptions {
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
+    readonly title?: string;
     readonly version: string;
   };
   /**
