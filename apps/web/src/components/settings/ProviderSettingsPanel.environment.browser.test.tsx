@@ -32,6 +32,7 @@ const state = vi.hoisted(() => ({
   updateProvider: vi.fn(),
   uninstall: vi.fn(),
   acceptUrlAuth: vi.fn(),
+  cloudRuntime: vi.fn(),
   updateSettings: vi.fn(),
   updateModelPreferences: vi.fn(),
   toggleFavorite: vi.fn(),
@@ -79,6 +80,13 @@ vi.mock(import("../../state/use-atom-command"), async (original) => ({
       update: state.updateProvider,
       uninstall: state.uninstall,
       "accept-url-auth": state.acceptUrlAuth,
+      "environment-data:cloud-runtime:list": state.cloudRuntime,
+      "environment-data:cloud-runtime:set-credential": state.cloudRuntime,
+      "environment-data:cloud-runtime:clear-credential": state.cloudRuntime,
+      "environment-data:cloud-runtime:test": state.cloudRuntime,
+      "environment-data:cloud-runtime:create-sandbox": state.cloudRuntime,
+      "environment-data:cloud-runtime:list-sandboxes": state.cloudRuntime,
+      "environment-data:cloud-runtime:sandbox-action": state.cloudRuntime,
     })[command.label ?? ""] ?? vi.fn()) as never,
 }));
 vi.mock(import("~/localApi"), async (original) => {
@@ -245,6 +253,9 @@ async function setup() {
   state.updateProvider.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   state.uninstall.mockReset().mockResolvedValue(AsyncResult.success({}));
   state.acceptUrlAuth.mockReset().mockResolvedValue(AsyncResult.success({ accepted: true }));
+  state.cloudRuntime
+    .mockReset()
+    .mockResolvedValue(AsyncResult.success({ runtimes: [], sandboxes: [] }));
   await setProviders([]);
 }
 
