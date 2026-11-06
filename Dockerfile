@@ -8,9 +8,9 @@ FROM node:26-bookworm-slim AS builder
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 
-RUN corepack enable && corepack prepare pnpm@12.14.0 --activate \
+RUN npm install -g pnpm@12.14.0 \
   && apt-get update \
-  && apt-get install -y --no-install-recommends python3 build-essential pkg-config libsecret-1-dev \
+  && apt-get install -y --no-install-recommends python3 build-essential pkg-config libsecret-1-dev git \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo
