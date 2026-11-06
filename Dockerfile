@@ -3,14 +3,14 @@
 # Build: docker build -t t3code-fork .
 # Run:   docker run --rm -p 3773:3773 -v t3-data:/home/node/.t3 t3code-fork
 
-FROM node:24-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 
-RUN corepack enable && corepack prepare pnpm@11.10.0 --activate \
+RUN npm install -g pnpm@12.14.0 \
   && apt-get update \
-  && apt-get install -y --no-install-recommends python3 build-essential pkg-config libsecret-1-dev \
+  && apt-get install -y --no-install-recommends python3 build-essential pkg-config libsecret-1-dev git \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo
@@ -22,7 +22,7 @@ RUN pnpm install --frozen-lockfile \
   && cp .env.example .env \
   && pnpm exec vp run --filter t3 build
 
-FROM node:24-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 
 ENV NODE_ENV=production
 ENV T3CODE_PORT=3773

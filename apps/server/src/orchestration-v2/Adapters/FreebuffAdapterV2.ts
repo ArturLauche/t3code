@@ -215,14 +215,15 @@ export interface FreebuffAdapterV2Options {
 const encodePrompt = (prompt: string, bracketedPaste: boolean): string =>
   bracketedPaste ? `${ESC}[200~${prompt}${ESC}[201~\r` : `${prompt.replaceAll(/\r?\n/gu, " ")}\r`;
 
-class FreebuffTerminalProcessError extends Error {
-  readonly operation: "write" | "kill";
-
-  constructor(operation: "write" | "kill", cause: unknown) {
-    super(`Freebuff terminal ${operation} failed.`);
-    this.name = "FreebuffTerminalProcessError";
-    this.operation = operation;
-    this.cause = cause;
+class FreebuffTerminalProcessError extends Schema.TaggedError<FreebuffTerminalProcessError>()(
+  "FreebuffTerminalProcessError",
+  {
+    operation: Schema.Union([Schema.Literal("write"), Schema.Literal("kill")]),
+    cause: Schema.Unknown,
+  },
+) {
+  override get message() {
+    return `Freebuff terminal ${this.operation} failed.`;
   }
 }
 
@@ -231,7 +232,7 @@ const tryWriteProcess = (process: PtyAdapter.PtyProcess, data: string) =>
     try: () => {
       process.write(data);
     },
-    catch: (cause) => new FreebuffTerminalProcessError("write", cause),
+    catch: (cause) => new FreebuffTerminalProcessError({ operation: "write", cause }),
   });
 
 const tryKillProcess = (process: PtyAdapter.PtyProcess, signal: string) =>
@@ -239,7 +240,7 @@ const tryKillProcess = (process: PtyAdapter.PtyProcess, signal: string) =>
     try: () => {
       process.kill(signal);
     },
-    catch: (cause) => new FreebuffTerminalProcessError("kill", cause),
+    catch: (cause) => new FreebuffTerminalProcessError({ operation: "kill", cause }),
   });
 
 /**

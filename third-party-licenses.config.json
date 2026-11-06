@@ -909,7 +909,7 @@
     },
     {
       "name": "@bufbuild/protobuf",
-      "version": "2.16.0",
+      "version": "2.17.0",
       "generatedNotices": [
         {
           "licenseId": "Apache-2.0",
@@ -920,6 +920,22 @@
           "copyrights": ["Copyright 2008 Google Inc. All rights reserved."]
         }
       ]
+    },
+    {
+      "name": "@connectrpc/connect",
+      "version": "2.3.0",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0",
+        "copyrights": ["Copyright 2021-2026 The Connect Authors"]
+      }
+    },
+    {
+      "name": "@connectrpc/connect-web",
+      "version": "2.3.0",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0",
+        "copyrights": ["Copyright 2021-2026 The Connect Authors"]
+      }
     },
     {
       "name": "@connectrpc/connect",

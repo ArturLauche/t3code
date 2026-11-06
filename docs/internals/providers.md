@@ -140,7 +140,7 @@ than by writing that boolean: Supervised asks the user through the normal approv
 access answers each request with Cline's own accept option. Cline does not remember a previous
 "allow always", so Full access re-approves every request instead of pretending the CLI learned the
 answer. The two in-between T3 modes are declared unsupported on the snapshot rather than silently
-widened. See [Cline provider](../../apps/server/src/provider/Layers/ClineProvider.ts).
+widened. See [Cline provider](../../apps/server/src/provider/ClineProvider.ts).
 
 Three more limits are declared the same way instead of being discovered at send time. Cline
 advertises `promptCapabilities.image: true` and then discards every non-text block before

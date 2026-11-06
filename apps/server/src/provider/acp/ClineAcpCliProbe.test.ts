@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
@@ -28,7 +29,7 @@ const runtimeMode: RuntimeMode = "full-access";
 
 const probeLayer = it.layer(
   ServerConfig.layerTest(process.cwd(), { prefix: "t3code-cline-probe-test-" }).pipe(
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, SecureRandom.layerWebCrypto)),
   ),
 );
 
