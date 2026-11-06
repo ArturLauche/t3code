@@ -13,10 +13,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
-import {
-  SettingsEnvironmentFilterHeader,
-  useSettingsEnvironmentMenu,
-} from "./components/SettingsEnvironmentFilterHeader";
+import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsSection } from "./components/SettingsSection";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import {
@@ -133,7 +130,6 @@ export function SettingsEnvironmentCloudRuntimesRouteScreen() {
   ];
   return (
     <>
-      <SettingsEnvironmentFilterHeader />
       <SettingsScreen title="Cloud runtimes" menus={[environmentMenu]}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"

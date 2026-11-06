@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, settingsSecretLiteral } from "@t3tools/contracts";
 import { OpenCodeSettings } from "../settings.ts";
 import {
   openCodeProviderEntries,
@@ -159,6 +159,11 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateReviewGuide(input),
         v2: v2.generateReviewGuide(input),
       }),
+    generateTranscriptionPostProcessing: (input) =>
+      byOpenCodeRuntime(probe.get, {
+        v1: v1.generateTranscriptionPostProcessing(input),
+        v2: v2.generateTranscriptionPostProcessing(input),
+      }),
   };
 }
 
@@ -220,6 +225,8 @@ export const OpenCodeDriver: ProviderDriver<
       ...config,
       enabled,
       binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+      // The instance registry has already read a referenced password from its secret provider.
+      serverPassword: settingsSecretLiteral(config.serverPassword),
     } satisfies OpenCodeSettings;
     // Settings-added providers become OpenCode's own config, merged over any
     // OPENCODE_CONFIG_CONTENT; T3 only supplies it and reads the inventory back.

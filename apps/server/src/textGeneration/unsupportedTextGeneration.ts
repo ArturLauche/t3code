@@ -27,5 +27,6 @@ export const makeUnsupportedTextGeneration = (
     generateBranchName: () => fail("generateBranchName"),
     generateThreadTitle: () => fail("generateThreadTitle"),
     generateReviewGuide: () => fail("generateReviewGuide"),
+    generateTranscriptionPostProcessing: () => fail("generateTranscriptionPostProcessing"),
   };
 };
