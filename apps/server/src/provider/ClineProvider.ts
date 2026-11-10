@@ -31,7 +31,8 @@ import {
 import {
   buildServerProvider,
   isCommandMissingCause,
-  parseGenericCliVersion,
+  parseCliVersionResult,
+  providerProbeEnvironment,
   spawnAndCollect,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
@@ -224,10 +225,14 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
     return yield* buildInitialClineProviderSnapshot(clineSettings);
   }
 
-  const versionResult = yield* runClineCliCommand(clineSettings, ["--version"], environment).pipe(
-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
-    Effect.result,
-  );
+  // A status refresh is a background probe: a lazy mise shim must not download Cline here.
+  // A real session keeps the plain environment, so mise still installs there.
+  const probeEnvironment = providerProbeEnvironment(environment ?? process.env);
+  const versionResult = yield* runClineCliCommand(
+    clineSettings,
+    ["--version"],
+    probeEnvironment,
+  ).pipe(Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS), Effect.result);
   if (Result.isFailure(versionResult)) {
     const error = versionResult.failure;
     yield* Effect.logWarning("Cline CLI health check failed.", { errorTag: error._tag });
@@ -264,7 +269,7 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
   }
 
   const versionOutput = versionResult.success.value;
-  const version = parseGenericCliVersion(`${versionOutput.stdout}\n${versionOutput.stderr}`);
+  const version = parseCliVersionResult(versionOutput);
   if (versionOutput.code !== 0) {
     yield* Effect.logWarning("Cline CLI version probe exited with a non-zero status.", {
       exitCode: versionOutput.code,
@@ -288,7 +293,7 @@ export const checkClineProviderStatus = Effect.fn("checkClineProviderStatus")(fu
 
   const discoveryExit = yield* discoverClineModelsViaAcp(
     clineSettings,
-    environment,
+    probeEnvironment,
     ACP_DISCOVERY_TIMEOUT_MS,
   ).pipe(Effect.exit);
   // `Effect.exit` also captures interruptions, and a probe cancelled because

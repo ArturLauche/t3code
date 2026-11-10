@@ -19,7 +19,8 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
   buildServerProvider,
   isCommandMissingCause,
-  parseGenericCliVersion,
+  parseCliVersionResult,
+  providerProbeEnvironment,
   spawnAndCollect,
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
@@ -129,10 +130,13 @@ export const checkFreebuffProviderStatus = Effect.fn("checkFreebuffProviderStatu
     };
   }
 
-  const result = yield* probeFreebuffVersion(settings, environment, cwd).pipe(
-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
-    Effect.result,
-  );
+  // A status refresh is a background probe: a lazy mise shim must not download
+  // Freebuff here. A real session keeps the plain environment.
+  const result = yield* probeFreebuffVersion(
+    settings,
+    providerProbeEnvironment(environment),
+    cwd,
+  ).pipe(Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS), Effect.result);
 
   if (Result.isFailure(result)) {
     const cause = result.failure;
@@ -176,7 +180,7 @@ export const checkFreebuffProviderStatus = Effect.fn("checkFreebuffProviderStatu
   }
 
   const output = result.success.value;
-  const version = parseGenericCliVersion(`${output.stdout}\n${output.stderr}`);
+  const version = parseCliVersionResult(output);
   const healthy = output.code === 0;
   return {
     ...buildServerProvider({
