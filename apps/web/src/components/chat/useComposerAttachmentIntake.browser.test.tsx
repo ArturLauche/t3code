@@ -94,6 +94,7 @@ it("prepares a repeated paste without a tile, and still keeps a different image"
     setThreadError: () => {},
     countReservedAttachments: () =>
       composerImagesRef.current.length + getPreparingComposerImages(target).length,
+    selectedProviderStatus: null,
     addComposerImage: (image) => addImages([image]),
     addComposerImagesToDraft: addImages,
     addComposerFilesToDraft: () => [],
@@ -178,6 +179,7 @@ it.each(["thread", "session"] as const)(
       isRevertingCheckpointRef: { current: false },
       setThreadError: () => {},
       countReservedAttachments: () => getPreparingComposerImages(targetKey).length,
+      selectedProviderStatus: null,
       addComposerImage: (image) => store.addImages(target, [image]),
       addComposerImagesToDraft: (images) => store.addImages(target, images),
       addComposerFilesToDraft: () => [],

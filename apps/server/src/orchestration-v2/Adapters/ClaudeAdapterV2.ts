@@ -14562,7 +14562,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
     hooks: Pick<
       ClaudeAdapterV2Options,
-      "scopedLimitNames" | "onUsageLimits" | "spawnClaudeCodeProcess" | "modelCatalog" | "onSessionInit" | "routeModelCatalog"
+      | "scopedLimitNames"
+      | "onUsageLimits"
+      | "spawnClaudeCodeProcess"
+      | "modelCatalog"
+      | "onSessionInit"
+      | "routeModelCatalog"
     > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;

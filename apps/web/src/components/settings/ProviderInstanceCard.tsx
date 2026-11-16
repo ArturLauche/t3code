@@ -168,16 +168,6 @@ function providerEnvironmentsEqual(
   );
 }
 
-/**
- * Read `customModels` from the opaque config blob. The concrete driver
- * schemas type it as `CustomModelSetting[]`, but it arrives here as
- * `Schema.Unknown`, so the shared reader does the shape checking.
- */
-function readConfigCustomModels(config: unknown): ReadonlyArray<CustomModelDefinition> {
-  if (config === null || typeof config !== "object") return [];
-  return readCustomModelEntries((config as Record<string, unknown>).customModels);
-}
-
 /** Whether this OpenCode instance talks to a server T3 Code does not start. */
 function serverUrlOf(config: unknown): string {
   if (config === null || typeof config !== "object") return "";

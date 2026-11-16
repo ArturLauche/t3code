@@ -198,7 +198,13 @@ export function ProviderModelsSection({
     builtInModels.length > 0 && builtInModels.every((model) => hiddenModels.includes(model.slug));
 
   const handleAdd = async () => {
-    if (!canManageCustomModels || driverKind === "antigravity" || driverKind === "opencode" || isSaving) return;
+    if (
+      !canManageCustomModels ||
+      driverKind === "antigravity" ||
+      driverKind === "opencode" ||
+      isSaving
+    )
+      return;
     const normalized = normalizeCustomModelSlug(input);
     if (!normalized) {
       setError("Enter a model slug.");

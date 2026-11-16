@@ -390,7 +390,7 @@ function isNewerOpenCodeContextSnapshot(
   return !sameOpenCodeContextTokens(previous.tokens, next.tokens);
 }
 
-function openCodeContextUsage(input: {
+function openCodeSnapshotContextUsage(input: {
   readonly tokens: OpenCodeContextTokens;
   readonly maxTokens: number | undefined;
   readonly updatedAt: DateTime.Utc;
@@ -1526,7 +1526,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           maxTokens: number | undefined,
         ) {
           if (turn.finalized) return;
-          const tokenUsage = openCodeContextUsage({
+          const tokenUsage = openCodeSnapshotContextUsage({
             tokens: snapshot.tokens,
             maxTokens,
             updatedAt: yield* DateTime.now,
