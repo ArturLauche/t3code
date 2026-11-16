@@ -2071,7 +2071,7 @@ export const ServerSettingsPatch = Schema.Struct({
   // executionTarget for compatibility with older clients; the server preserves
   // the existing target unless the patch explicitly sends null.
   providerInstances: Schema.optionalKey(ProviderInstanceConfigMapPatch),
-  // Per-entry cloud runtime patches avoid overwriting another clients edit;
+  // Per-entry cloud runtime patches avoid overwriting another client's edit;
   // `null` removes one runtime while omitted entries remain unchanged.
   cloudRuntimeInstances: Schema.optionalKey(CloudRuntimeConfigMapPatch),
   usageLimitSources: Schema.optionalKey(
