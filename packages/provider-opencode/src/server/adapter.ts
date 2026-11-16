@@ -3559,11 +3559,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           Effect.forkIn(scope),
         );
 
-        // The provider list names every model's context window, and the
-        // handoff budget of the first turn measures against it, so the catalog
-        // is read before the session opens. The read is bounded, and it runs
-        // after the subscription, so a slow catalog never misses an event.
-        yield* readContextWindows();
+        // Warm the context-window catalog off the critical path: the handoff
+        // budget and meter need the window, but a slow catalog must not delay
+        // opening a session. A turn reads it again if the window is still missing.
+        yield* readContextWindows().pipe(Effect.forkIn(scope));
 
         if (!connection.external && connection.exitCode !== null) {
           yield* connection.exitCode.pipe(
