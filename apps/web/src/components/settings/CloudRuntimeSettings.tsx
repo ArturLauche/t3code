@@ -7,9 +7,11 @@ import {
   type CloudRuntimeKind,
   type EnvironmentId,
 } from "@t3tools/contracts";
+import { msg, T, useGT, useMessages } from "gt-react";
 import { PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import type { MessageResolver } from "../../i18n/messages";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { serverEnvironment } from "../../state/server";
@@ -99,19 +101,19 @@ function runtimeLabel(runtime: CloudRuntimeInstance): string {
   return runtime.config.displayName?.trim() || runtime.id;
 }
 
-function healthLabel(runtime: CloudRuntimeInstance): string {
+function healthLabel(runtime: CloudRuntimeInstance, m: MessageResolver): string {
   if (runtime.health.message) return runtime.health.message;
   switch (runtime.health.status) {
     case "ready":
-      return "Ready";
+      return m(msg("Ready"));
     case "unconfigured":
-      return "Add an API key to configure this runtime.";
+      return m(msg("Add an API key to configure this runtime."));
     case "disabled":
-      return "Disabled";
+      return m(msg("Disabled"));
     case "error":
-      return "The last health check failed.";
+      return m(msg("The last health check failed."));
     default:
-      return "Checking runtime…";
+      return m(msg("Checking runtime…"));
   }
 }
 
@@ -122,6 +124,8 @@ export function CloudRuntimeSettings({
   readonly environmentId: EnvironmentId;
   readonly readOnly?: boolean;
 }) {
+  const gt = useGT();
+  const m = useMessages();
   const settings = useEnvironmentSettings(environmentId);
   // The cloud runtime map is server-owned, so it goes straight to the
   // environment command rather than through the client/shared patch split.
@@ -382,7 +386,9 @@ export function CloudRuntimeSettings({
               sandboxes: [],
               health: {
                 status: config.enabled ? "checking" : "disabled",
-                message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+                message: config.enabled
+                  ? gt("Checking runtime…")
+                  : gt("Cloud runtime is disabled."),
                 // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
                 checkedAt: new Date().toISOString(),
               },
@@ -396,7 +402,7 @@ export function CloudRuntimeSettings({
       hasCredential: false,
       health: {
         status: config.enabled ? "checking" : "disabled",
-        message: config.enabled ? "Checking runtime…" : "Cloud runtime is disabled.",
+        message: config.enabled ? gt("Checking runtime…") : gt("Cloud runtime is disabled."),
         // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
         checkedAt: new Date().toISOString(),
       },
@@ -407,12 +413,12 @@ export function CloudRuntimeSettings({
   return (
     <SettingsSection
       id="cloud-runtimes"
-      title="Cloud runtimes"
+      title={gt("Cloud runtimes")}
       headerAction={
         <Button
           size="icon-xs"
           variant="ghost-muted"
-          aria-label="Refresh cloud runtimes"
+          aria-label={gt("Refresh cloud runtimes")}
           disabled={readOnly || busyId !== null}
           onClick={() => void refresh()}
         >
@@ -422,8 +428,10 @@ export function CloudRuntimeSettings({
     >
       <SettingsGroup divided={false} className="overflow-hidden">
         <SettingsRow
-          title="Remote execution targets"
-          description="Run Codex, Claude Code, and other compatible agents in an isolated cloud sandbox. Credentials are stored by the environment, never in settings."
+          title={gt("Remote execution targets")}
+          description={gt(
+            "Run Codex, Claude Code, and other compatible agents in an isolated cloud sandbox. Credentials are stored by the environment, never in settings.",
+          )}
         />
         {visibleRuntimes.map((runtime) => {
           const config = configuredRuntimes[runtime.id];
@@ -437,11 +445,11 @@ export function CloudRuntimeSettings({
                   <p className="truncate font-mono text-xs text-muted-foreground">{runtime.id}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">{healthLabel(runtime)}</span>
+                  <span className="text-xs text-muted-foreground">{healthLabel(runtime, m)}</span>
                   <Button
                     size="icon-xs"
                     variant="ghost-muted"
-                    aria-label={`Remove ${runtimeLabel(runtime)}`}
+                    aria-label={gt("Remove {name}", { name: runtimeLabel(runtime) })}
                     disabled={readOnly || isBusy}
                     onClick={() => removeRuntime(runtime)}
                   >
@@ -451,7 +459,7 @@ export function CloudRuntimeSettings({
               </div>
               <div className="space-y-1">
                 <SettingsRow
-                  title="Vendor"
+                  title={gt("Vendor")}
                   control={
                     <Select
                       value={config.kind}
@@ -474,7 +482,7 @@ export function CloudRuntimeSettings({
                   }
                 />
                 <SettingsRow
-                  title="Display name"
+                  title={gt("Display name")}
                   control={
                     <Input
                       size="sm"
@@ -486,7 +494,7 @@ export function CloudRuntimeSettings({
                   }
                 />
                 <SettingsRow
-                  title="Enabled"
+                  title={gt("Enabled")}
                   control={
                     <Switch
                       size="sm"
@@ -497,52 +505,52 @@ export function CloudRuntimeSettings({
                   }
                 />
                 <SettingsRow
-                  title="Region"
-                  description="Optional vendor region, for example us-east-1."
+                  title={gt("Region")}
+                  description={gt("Optional vendor region, for example us-east-1.")}
                   control={
                     <Input
                       size="sm"
                       value={config.region ?? ""}
-                      placeholder="Default"
+                      placeholder={gt("Default")}
                       disabled={readOnly}
                       onValueChange={(value) => updateRuntime(runtime.id, { region: value })}
                     />
                   }
                 />
                 <SettingsRow
-                  title="Domain"
-                  description="Optional E2B or Novita API domain."
+                  title={gt("Domain")}
+                  description={gt("Optional E2B or Novita API domain.")}
                   control={
                     <Input
                       size="sm"
                       value={config.domain ?? ""}
-                      placeholder="Vendor default"
+                      placeholder={gt("Vendor default")}
                       disabled={readOnly}
                       onValueChange={(value) => updateRuntime(runtime.id, { domain: value })}
                     />
                   }
                 />
                 <SettingsRow
-                  title="Template or snapshot"
-                  description="Optional sandbox image/template identifier."
+                  title={gt("Template or snapshot")}
+                  description={gt("Optional sandbox image/template identifier.")}
                   control={
                     <Input
                       size="sm"
                       value={config.template ?? ""}
-                      placeholder="Vendor default"
+                      placeholder={gt("Vendor default")}
                       disabled={readOnly}
                       onValueChange={(value) => updateRuntime(runtime.id, { template: value })}
                     />
                   }
                 />
                 <SettingsRow
-                  title="API endpoint"
-                  description="Optional custom Daytona API endpoint."
+                  title={gt("API endpoint")}
+                  description={gt("Optional custom Daytona API endpoint.")}
                   control={
                     <Input
                       size="sm"
                       value={apiUrlDrafts[runtime.id] ?? config.apiUrl ?? ""}
-                      placeholder="Vendor default"
+                      placeholder={gt("Vendor default")}
                       disabled={readOnly}
                       onValueChange={(value) =>
                         setApiUrlDrafts((current) => ({ ...current, [runtime.id]: value }))
@@ -560,8 +568,10 @@ export function CloudRuntimeSettings({
                   }
                 />
                 <SettingsRow
-                  title="Auto-pause minutes"
-                  description="Automatically pause idle Daytona sandboxes. Leave blank for the vendor default."
+                  title={gt("Auto-pause minutes")}
+                  description={gt(
+                    "Automatically pause idle Daytona sandboxes. Leave blank for the vendor default.",
+                  )}
                   control={
                     <Input
                       size="sm"
@@ -570,7 +580,7 @@ export function CloudRuntimeSettings({
                       value={
                         config.autoPauseMinutes === undefined ? "" : String(config.autoPauseMinutes)
                       }
-                      placeholder="Vendor default"
+                      placeholder={gt("Vendor default")}
                       disabled={readOnly}
                       onValueChange={(value) =>
                         updateRuntime(runtime.id, {
@@ -586,12 +596,12 @@ export function CloudRuntimeSettings({
                   }
                 />
                 <SettingsRow
-                  title="Setup commands"
-                  description="One command per line. They run when a new sandbox is prepared."
+                  title={gt("Setup commands")}
+                  description={gt("One command per line. They run when a new sandbox is prepared.")}
                   control={
                     <Textarea
                       value={setupCommandDrafts[runtime.id] ?? config.setupCommands.join("\n")}
-                      placeholder="npm install -g @openai/codex"
+                      placeholder={gt("npm install -g @openai/codex")}
                       rows={3}
                       disabled={readOnly}
                       onChange={(event) =>
@@ -621,11 +631,11 @@ export function CloudRuntimeSettings({
                   }
                 />
                 <SettingsRow
-                  title="API key"
+                  title={gt("API key")}
                   description={
                     runtime.hasCredential
-                      ? "A credential is stored. Enter a new value only to replace it."
-                      : "Required before this runtime can be tested or used."
+                      ? gt("A credential is stored. Enter a new value only to replace it.")
+                      : gt("Required before this runtime can be tested or used.")
                   }
                   control={
                     <div className="flex min-w-0 items-center gap-2">
@@ -634,7 +644,7 @@ export function CloudRuntimeSettings({
                         type="password"
                         autoComplete="new-password"
                         value={apiKeys[runtime.id] ?? ""}
-                        placeholder={runtime.hasCredential ? "••••••••" : "Enter API key"}
+                        placeholder={runtime.hasCredential ? "••••••••" : gt("Enter API key")}
                         disabled={readOnly}
                         onValueChange={(value) =>
                           setApiKeys((current) => ({ ...current, [runtime.id]: value }))
@@ -649,7 +659,7 @@ export function CloudRuntimeSettings({
                           )
                         }
                       >
-                        Save
+                        <T>Save</T>
                       </Button>
                       {runtime.hasCredential ? (
                         <Button
@@ -658,15 +668,17 @@ export function CloudRuntimeSettings({
                           disabled={readOnly || isBusy}
                           onClick={() => void runCredentialCommand(runtime.id, "clear")}
                         >
-                          Clear
+                          <T>Clear</T>
                         </Button>
                       ) : null}
                     </div>
                   }
                 />
                 <SettingsRow
-                  title="Actions"
-                  description="Test the connection or prepare a sandbox for a new remote agent session."
+                  title={gt("Actions")}
+                  description={gt(
+                    "Test the connection or prepare a sandbox for a new remote agent session.",
+                  )}
                   control={
                     <div className="flex items-center gap-2">
                       <Button
@@ -679,7 +691,7 @@ export function CloudRuntimeSettings({
                           )
                         }
                       >
-                        Test
+                        <T>Test</T>
                       </Button>
                       <Button
                         size="xs"
@@ -690,15 +702,15 @@ export function CloudRuntimeSettings({
                           )
                         }
                       >
-                        Create sandbox
+                        <T>Create sandbox</T>
                       </Button>
                     </div>
                   }
                 />
                 {runtime.sandboxes.length > 0 ? (
                   <SettingsRow
-                    title="Sandboxes"
-                    description="Pause, resume, stop, or remove a remote sandbox."
+                    title={gt("Sandboxes")}
+                    description={gt("Pause, resume, stop, or remove a remote sandbox.")}
                     control={
                       <div className="w-full space-y-2">
                         {runtime.sandboxes.map((sandbox) => (
@@ -720,7 +732,7 @@ export function CloudRuntimeSettings({
                                     void runSandboxCommand(runtime, sandbox.sandboxId, "pause")
                                   }
                                 >
-                                  Pause
+                                  <T>Pause</T>
                                 </Button>
                               ) : null}
                               {sandbox.state === "paused" ? (
@@ -732,7 +744,7 @@ export function CloudRuntimeSettings({
                                     void runSandboxCommand(runtime, sandbox.sandboxId, "resume")
                                   }
                                 >
-                                  Resume
+                                  <T>Resume</T>
                                 </Button>
                               ) : null}
                               {sandbox.state !== "stopped" && sandbox.state !== "error" ? (
@@ -744,7 +756,7 @@ export function CloudRuntimeSettings({
                                     void runSandboxCommand(runtime, sandbox.sandboxId, "stop")
                                   }
                                 >
-                                  Stop
+                                  <T>Stop</T>
                                 </Button>
                               ) : null}
                               <Button
@@ -755,7 +767,7 @@ export function CloudRuntimeSettings({
                                   void runSandboxCommand(runtime, sandbox.sandboxId, "delete")
                                 }
                               >
-                                Delete
+                                <T>Delete</T>
                               </Button>
                             </div>
                           </div>
@@ -768,7 +780,7 @@ export function CloudRuntimeSettings({
                             void withCommittedDrafts(runtime.id, () => refreshSandboxes(runtime.id))
                           }
                         >
-                          Refresh sandboxes
+                          <T>Refresh sandboxes</T>
                         </Button>
                       </div>
                     }
@@ -779,8 +791,8 @@ export function CloudRuntimeSettings({
           );
         })}
         <SettingsRow
-          title="Add runtime"
-          description="Use a stable lowercase or uppercase identifier, for example team-e2b."
+          title={gt("Add runtime")}
+          description={gt("Use a stable lowercase or uppercase identifier, for example team-e2b.")}
           control={
             <div className="flex items-center gap-2">
               <Input
@@ -800,7 +812,7 @@ export function CloudRuntimeSettings({
                 onClick={addRuntime}
               >
                 <PlusIcon />
-                Add
+                <T>Add</T>
               </Button>
             </div>
           }

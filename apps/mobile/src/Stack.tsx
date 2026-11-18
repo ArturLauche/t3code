@@ -164,6 +164,7 @@ const ROUTE_TITLES: Readonly<Record<string, string>> = {
   Settings: msg("Settings"),
   SettingsEnvironments: msg("Environments"),
   SettingsEnvironmentDetail: msg("Environment"),
+  SettingsEnvironmentCloudRuntimes: msg("Cloud runtimes"),
   SettingsEnvironmentNewThreads: msg("Threads"),
   SettingsEnvironmentSourceControl: msg("Source control & issues"),
   SettingsSourceControlProvider: msg("Provider", {
@@ -271,7 +272,7 @@ const SETTINGS_SCREENS = {
   SettingsEnvironmentCloudRuntimes: createNativeStackScreen({
     screen: SettingsEnvironmentCloudRuntimesRouteScreen,
     linking: "settings/cloud-runtimes",
-    options: settingsPage("Cloud runtimes"),
+    options: settingsPage(),
   }),
   SettingsWorktrees: createNativeStackScreen({
     screen: SettingsWorktreesRouteScreen,

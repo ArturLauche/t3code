@@ -4,6 +4,7 @@ import {
   type CloudRuntimeInstance,
   type CloudRuntimeKind,
 } from "@t3tools/contracts";
+import { msg, T, useGT, useMessages } from "gt-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,6 +13,7 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { AppText as Text } from "../../components/ui/AppText";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import type { MessageResolver } from "../../i18n/messages";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsSection } from "./components/SettingsSection";
@@ -98,23 +100,24 @@ const runtimeConnectionFingerprint = (config: CloudRuntimeConfig): string =>
     config.setupCommands,
   ]);
 
-function healthText(runtime: CloudRuntimeInstance): string {
+function healthText(runtime: CloudRuntimeInstance, messages: MessageResolver): string {
   if (runtime.health.message) return runtime.health.message;
   switch (runtime.health.status) {
     case "ready":
-      return "Ready";
+      return messages(msg("Ready"));
     case "unconfigured":
-      return "Add an API key";
+      return messages(msg("Add an API key"));
     case "disabled":
-      return "Disabled";
+      return messages(msg("Disabled"));
     case "error":
-      return "Connection error";
+      return messages(msg("Connection error"));
     default:
-      return "Checking…";
+      return messages(msg("Checking…"));
   }
 }
 
 export function SettingsEnvironmentCloudRuntimesRouteScreen() {
+  const gt = useGT();
   const insets = useSafeAreaInsets();
   const environmentMenu = useSettingsEnvironmentMenu();
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
@@ -130,7 +133,7 @@ export function SettingsEnvironmentCloudRuntimesRouteScreen() {
   ];
   return (
     <>
-      <SettingsScreen title="Cloud runtimes" menus={[environmentMenu]}>
+      <SettingsScreen title={gt("Cloud runtimes")} menus={[environmentMenu]}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
@@ -140,7 +143,7 @@ export function SettingsEnvironmentCloudRuntimesRouteScreen() {
         >
           {environmentTargets.length === 0 ? (
             <Text className="px-2 text-base text-foreground-muted">
-              Select a connected environment.
+              <T>Select a connected environment.</T>
             </Text>
           ) : (
             environmentTargets.map((target) => (
@@ -159,6 +162,8 @@ export function SettingsEnvironmentCloudRuntimesRouteScreen() {
 }
 
 function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSettingsTarget }) {
+  const gt = useGT();
+  const messages = useMessages();
   const environmentId = target.environment.environmentId;
   const settings = target.settings;
   const [runtimes, setRuntimes] = useState<ReadonlyArray<CloudRuntimeInstance>>([]);
@@ -253,7 +258,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   sandboxes: [],
                   health: {
                     status: config.enabled ? "checking" : "disabled",
-                    message: config.enabled ? "Checking…" : "Disabled",
+                    message: config.enabled ? gt("Checking…") : gt("Disabled"),
                     // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
                     checkedAt: new Date().toISOString(),
                   },
@@ -267,14 +272,14 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
           hasCredential: false,
           health: {
             status: config.enabled ? "checking" : "disabled",
-            message: config.enabled ? "Checking…" : "Disabled",
+            message: config.enabled ? gt("Checking…") : gt("Disabled"),
             // oxlint-disable-next-line react/purity -- Placeholder health timestamp for a runtime that is still being checked.
             checkedAt: new Date().toISOString(),
           },
           sandboxes: [],
         } satisfies CloudRuntimeInstance;
       }),
-    [configuredRuntimes, runtimes],
+    [configuredRuntimes, gt, runtimes],
   );
 
   const discardDraft = (
@@ -405,9 +410,11 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
 
   return (
     <>
-      <SettingsSection title="Configured runtimes">
+      <SettingsSection title={gt("Configured runtimes")}>
         {visibleRuntimes.length === 0 ? (
-          <Text className="p-4 text-base text-foreground-muted">No cloud runtimes configured.</Text>
+          <Text className="p-4 text-base text-foreground-muted">
+            <T>No cloud runtimes configured.</T>
+          </Text>
         ) : (
           visibleRuntimes.map((runtime) => {
             const config = configuredRuntimes[runtime.id];
@@ -423,14 +430,16 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     <Text className="truncate text-lg text-foreground">
                       {config.displayName ?? runtime.id}
                     </Text>
-                    <Text className="text-sm text-foreground-muted">{healthText(runtime)}</Text>
+                    <Text className="text-sm text-foreground-muted">
+                      {healthText(runtime, messages)}
+                    </Text>
                   </View>
                   <Switch
                     value={config.enabled}
                     onValueChange={(enabled) => void updateRuntime(runtime.id, { enabled })}
                   />
                   <RuntimeButton
-                    label="Remove"
+                    label={gt("Remove")}
                     disabled={busy}
                     onPress={() => removeRuntime(runtime.id)}
                   />
@@ -441,27 +450,27 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   onChange={(kind) => void updateRuntime(runtime.id, { kind })}
                 />
                 <RuntimeInput
-                  label="Display name"
+                  label={gt("Display name")}
                   value={config.displayName ?? ""}
                   onChangeText={(displayName) => void updateRuntime(runtime.id, { displayName })}
                 />
                 <RuntimeInput
-                  label="Region"
+                  label={gt("Region")}
                   value={config.region ?? ""}
                   onChangeText={(region) => void updateRuntime(runtime.id, { region })}
                 />
                 <RuntimeInput
-                  label="Template or snapshot"
+                  label={gt("Template or snapshot")}
                   value={config.template ?? ""}
                   onChangeText={(template) => void updateRuntime(runtime.id, { template })}
                 />
                 <RuntimeInput
-                  label="Domain"
+                  label={gt("Domain")}
                   value={config.domain ?? ""}
                   onChangeText={(domain) => void updateRuntime(runtime.id, { domain })}
                 />
                 <RuntimeInput
-                  label="API endpoint"
+                  label={gt("API endpoint")}
                   value={apiUrlDrafts[runtime.id] ?? config.apiUrl ?? ""}
                   onChangeText={(value) =>
                     setApiUrlDrafts((current) => ({ ...current, [runtime.id]: value }))
@@ -477,7 +486,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   }}
                 />
                 <RuntimeInput
-                  label="Auto-pause minutes"
+                  label={gt("Auto-pause minutes")}
                   value={
                     config.autoPauseMinutes === undefined ? "" : String(config.autoPauseMinutes)
                   }
@@ -493,7 +502,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   }}
                 />
                 <RuntimeInput
-                  label="Setup commands (one per line)"
+                  label={gt("Setup commands (one per line)")}
                   value={setupCommandDrafts[runtime.id] ?? config.setupCommands.join("\n")}
                   multiline
                   onChangeText={(value) =>
@@ -509,10 +518,12 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   }}
                 />
                 <RuntimeInput
-                  label="API key"
+                  label={gt("API key")}
                   value={apiKeys[runtime.id] ?? ""}
                   secureTextEntry
-                  placeholder={runtime.hasCredential ? "Stored; enter a replacement" : "Required"}
+                  placeholder={
+                    runtime.hasCredential ? gt("Stored; enter a replacement") : gt("Required")
+                  }
                   onChangeText={(value) =>
                     setApiKeys((current) => ({ ...current, [runtime.id]: value }))
                   }
@@ -520,7 +531,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
 
                 <View className="flex-row flex-wrap gap-2">
                   <RuntimeButton
-                    label="Save key"
+                    label={gt("Save key")}
                     disabled={busy || !apiKeys[runtime.id]?.trim()}
                     onPress={() =>
                       void withCommittedDrafts(runtime.id, async () => {
@@ -539,7 +550,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     }
                   />
                   <RuntimeButton
-                    label="Test"
+                    label={gt("Test")}
                     disabled={busy || !config.enabled || !runtime.hasCredential}
                     onPress={() =>
                       void withCommittedDrafts(runtime.id, async () => {
@@ -552,7 +563,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     }
                   />
                   <RuntimeButton
-                    label="Create sandbox"
+                    label={gt("Create sandbox")}
                     disabled={busy || !config.enabled || !runtime.hasCredential}
                     onPress={() =>
                       void withCommittedDrafts(runtime.id, async () => {
@@ -574,7 +585,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                   />
                   {runtime.hasCredential ? (
                     <RuntimeButton
-                      label="Clear key"
+                      label={gt("Clear key")}
                       disabled={busy}
                       onPress={() =>
                         void run(runtime.id, async () => {
@@ -596,7 +607,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                     </Text>
                     <View className="flex-row flex-wrap gap-2">
                       <RuntimeButton
-                        label="Refresh"
+                        label={gt("Refresh")}
                         disabled={busy}
                         onPress={() =>
                           void withCommittedDrafts(runtime.id, async () => {
@@ -618,7 +629,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                       />
                       {sandbox.state === "running" ? (
                         <RuntimeButton
-                          label="Pause"
+                          label={gt("Pause")}
                           disabled={busy}
                           onPress={() =>
                             void runSandboxAction(runtime.id, sandbox.sandboxId, "pause")
@@ -627,7 +638,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                       ) : null}
                       {sandbox.state === "paused" ? (
                         <RuntimeButton
-                          label="Resume"
+                          label={gt("Resume")}
                           disabled={busy}
                           onPress={() =>
                             void runSandboxAction(runtime.id, sandbox.sandboxId, "resume")
@@ -636,7 +647,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                       ) : null}
                       {sandbox.state !== "stopped" && sandbox.state !== "error" ? (
                         <RuntimeButton
-                          label="Stop"
+                          label={gt("Stop")}
                           disabled={busy}
                           onPress={() =>
                             void runSandboxAction(runtime.id, sandbox.sandboxId, "stop")
@@ -644,7 +655,7 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
                         />
                       ) : null}
                       <RuntimeButton
-                        label="Delete"
+                        label={gt("Delete")}
                         disabled={busy}
                         onPress={() =>
                           void runSandboxAction(runtime.id, sandbox.sandboxId, "delete")
@@ -659,16 +670,16 @@ function CloudRuntimeSettings({ target }: { readonly target: ScopedMobileSetting
         )}
       </SettingsSection>
 
-      <SettingsSection title="Add runtime">
+      <SettingsSection title={gt("Add runtime")}>
         <View className="gap-3 p-4">
           <RuntimeInput
-            label="Runtime ID"
+            label={gt("Runtime ID")}
             value={newRuntimeId}
             autoCapitalize="none"
             onChangeText={setNewRuntimeId}
           />
           <RuntimeButton
-            label="Add runtime"
+            label={gt("Add runtime")}
             disabled={
               !isValidRuntimeId(newRuntimeId.trim()) ||
               configuredRuntimes[newRuntimeId.trim() as CloudRuntimeId] !== undefined
@@ -717,7 +728,9 @@ function RuntimeChoice(props: {
 }) {
   return (
     <View className="gap-1">
-      <Text className="text-sm text-foreground-muted">Vendor</Text>
+      <Text className="text-sm text-foreground-muted">
+        <T>Vendor</T>
+      </Text>
       <View className="flex-row flex-wrap gap-2">
         {RUNTIME_KINDS.map((kind) => (
           <RuntimeButton

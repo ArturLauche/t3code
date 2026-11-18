@@ -26,6 +26,7 @@ import { piClient } from "@t3tools/provider-pi/client";
 const clineClient = defineProviderClient({
   driverKind: ProviderDriverKind.make("cline"),
   label: "Cline",
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- provider badge stays English, same as upstream badges
   badgeLabel: "Early Access",
   settingsSchema: ClineSettings,
   supportsCloudExecution: false,
@@ -53,6 +54,7 @@ const clineClient = defineProviderClient({
 const freebuffClient = defineProviderClient({
   driverKind: ProviderDriverKind.make("freebuff"),
   label: "Freebuff",
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- provider badge stays English, same as upstream badges
   badgeLabel: "Experimental",
   settingsSchema: FreebuffSettings,
   supportsCloudExecution: false,
