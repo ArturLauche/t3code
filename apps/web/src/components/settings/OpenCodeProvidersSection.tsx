@@ -1,5 +1,6 @@
 "use client";
 
+import { T, useGT } from "gt-react";
 import { ChevronRightIcon, LockIcon, PencilIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
 import type {
@@ -61,6 +62,7 @@ function OpenCodeProviderFields({
   readonly onChange: (next: OpenCodeProviderEntry) => void;
   readonly error: string | null;
 }) {
+  const gt = useGT();
   // A new provider usually needs a package, so its advanced fields start open;
   // an existing one keeps them behind a disclosure.
   const [showAdvanced, setShowAdvanced] = useState(isNew);
@@ -69,8 +71,8 @@ function OpenCodeProviderFields({
   return (
     <div className="flex flex-col gap-1 px-3 pb-3 sm:px-4">
       <SettingsRow
-        title="Display name"
-        description="Optional. OpenCode shows this instead of the provider id."
+        title={gt("Display name")}
+        description={gt("Optional. OpenCode shows this instead of the provider id.")}
         control={
           <Input
             size="sm"
@@ -78,14 +80,14 @@ function OpenCodeProviderFields({
             value={entry.name ?? ""}
             onChange={(event) => onChange({ ...entry, name: event.target.value })}
             placeholder={entry.providerId}
-            aria-label="Provider display name"
+            aria-label={gt("Provider display name")}
             spellCheck={false}
           />
         }
       />
       <SettingsRow
-        title="Base URL"
-        description="Optional. Point this provider at a relay or self-hosted endpoint."
+        title={gt("Base URL")}
+        description={gt("Optional. Point this provider at a relay or self-hosted endpoint.")}
         control={
           <Input
             size="sm"
@@ -94,19 +96,19 @@ function OpenCodeProviderFields({
             value={entry.baseUrl ?? ""}
             onChange={(event) => onChange({ ...entry, baseUrl: event.target.value })}
             placeholder="https://api.example.com/v1"
-            aria-label="Provider base URL"
+            aria-label={gt("Provider base URL")}
             spellCheck={false}
           />
         }
       />
       <SettingsRow
-        title="API key"
-        description="Stored separately from settings and never sent back to the app."
+        title={gt("API key")}
+        description={gt("Stored separately from settings and never sent back to the app.")}
         status={
           entry.apiKeyRedacted ? (
             <span className="inline-flex items-center gap-1.5">
               <LockIcon className="size-3" aria-hidden />
-              A key is stored for this provider.
+              <T>A key is stored for this provider.</T>
             </span>
           ) : null
         }
@@ -126,9 +128,11 @@ function OpenCodeProviderFields({
                 })
               }
               placeholder={
-                entry.apiKeyRedacted ? "Stored, enter a new value to replace" : "No key stored"
+                entry.apiKeyRedacted
+                  ? gt("Stored, enter a new value to replace")
+                  : gt("No key stored")
               }
-              aria-label="Provider API key"
+              aria-label={gt("Provider API key")}
               spellCheck={false}
             />
             {entry.apiKeyRedacted ? (
@@ -139,14 +143,16 @@ function OpenCodeProviderFields({
                       type="button"
                       size="icon-micro"
                       variant="ghost-muted"
-                      aria-label="Remove stored API key"
+                      aria-label={gt("Remove stored API key")}
                       onClick={() => onChange({ ...entry, apiKey: "", apiKeyRedacted: false })}
                     />
                   }
                 >
                   <XIcon className="size-3" />
                 </TooltipTrigger>
-                <TooltipPopup side="top">Remove stored key</TooltipPopup>
+                <TooltipPopup side="top">
+                  <T>Remove stored key</T>
+                </TooltipPopup>
               </Tooltip>
             ) : null}
           </>
@@ -154,8 +160,10 @@ function OpenCodeProviderFields({
       />
       {!isNew || showAdvanced ? (
         <SettingsRow
-          title="Advanced"
-          description="Package OpenCode loads for this provider, and environment variables it may read a key from."
+          title={gt("Advanced")}
+          description={gt(
+            "Package OpenCode loads for this provider, and environment variables it may read a key from.",
+          )}
           control={
             <Button
               type="button"
@@ -166,7 +174,7 @@ function OpenCodeProviderFields({
               <ChevronRightIcon
                 className={cn("size-3 transition-transform", showAdvanced && "rotate-90")}
               />
-              {showAdvanced ? "Hide" : "Show"}
+              {showAdvanced ? gt("Hide") : gt("Show")}
             </Button>
           }
         />
@@ -174,10 +182,12 @@ function OpenCodeProviderFields({
       {!showAdvanced ? null : (
         <>
           <SettingsRow
-            title="Package"
+            title={gt("Package")}
             description={
               npmIssue ??
-              "Optional. OpenCode loads its own SDK for a provider it already knows; set this for anything else."
+              gt(
+                "Optional. OpenCode loads its own SDK for a provider it already knows; set this for anything else.",
+              )
             }
             control={
               <Input
@@ -187,14 +197,16 @@ function OpenCodeProviderFields({
                 value={entry.npm ?? ""}
                 onChange={(event) => onChange({ ...entry, npm: event.target.value })}
                 placeholder="@ai-sdk/openai-compatible"
-                aria-label="Provider package"
+                aria-label={gt("Provider package")}
                 spellCheck={false}
               />
             }
           />
           <SettingsRow
-            title="Key environment variables"
-            description="Comma separated. OpenCode reads the key from these before using the stored one."
+            title={gt("Key environment variables")}
+            description={gt(
+              "Comma separated. OpenCode reads the key from these before using the stored one.",
+            )}
             control={
               <Input
                 size="sm"
@@ -210,8 +222,8 @@ function OpenCodeProviderFields({
                       .filter((value) => value.length > 0),
                   })
                 }
-                placeholder="MY_PROVIDER_API_KEY"
-                aria-label="Provider key environment variables"
+                placeholder={gt("MY_PROVIDER_API_KEY")}
+                aria-label={gt("Provider key environment variables")}
                 spellCheck={false}
               />
             }
@@ -259,6 +271,7 @@ function OpenCodeModelFields({
   readonly onSave: () => void;
   readonly error: string | null;
 }) {
+  const gt = useGT();
   return (
     <div
       className="flex flex-col gap-2 rounded-md border border-border bg-muted/20 p-3"
@@ -271,7 +284,9 @@ function OpenCodeModelFields({
     >
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-2xs text-muted-foreground">Model id</span>
+          <span className="text-2xs text-muted-foreground">
+            <T>Model id</T>
+          </span>
           <Input
             size="sm"
             font="mono"
@@ -279,20 +294,22 @@ function OpenCodeModelFields({
             className="min-w-0"
             value={draft.modelId}
             onChange={(event) => onChange({ ...draft, modelId: event.target.value })}
-            placeholder="gpt-5.4 or vendor/model"
-            aria-label="Model id"
+            placeholder={gt("gpt-5.4 or vendor/model")}
+            aria-label={gt("Model id")}
             spellCheck={false}
           />
         </label>
         <label className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-2xs text-muted-foreground">Display name</span>
+          <span className="text-2xs text-muted-foreground">
+            <T>Display name</T>
+          </span>
           <Input
             size="sm"
             className="min-w-0"
             value={draft.name ?? ""}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
-            placeholder={draft.modelId || "Optional"}
-            aria-label="Model display name"
+            placeholder={draft.modelId || gt("Optional")}
+            aria-label={gt("Model display name")}
             spellCheck={false}
           />
         </label>
@@ -303,30 +320,32 @@ function OpenCodeModelFields({
             size="sm"
             checked={draft.reasoning === true}
             onCheckedChange={(checked) => onChange({ ...draft, reasoning: Boolean(checked) })}
-            aria-label="Model supports reasoning"
+            aria-label={gt("Model supports reasoning")}
           />
-          Reasoning
+          <T>Reasoning</T>
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Switch
             size="sm"
             checked={draft.attachment === true}
             onCheckedChange={(checked) => onChange({ ...draft, attachment: Boolean(checked) })}
-            aria-label="Model accepts image attachments"
+            aria-label={gt("Model accepts image attachments")}
           />
-          Images
+          <T>Images</T>
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Switch
             size="sm"
             checked={draft.toolCall === true}
             onCheckedChange={(checked) => onChange({ ...draft, toolCall: Boolean(checked) })}
-            aria-label="Model supports tool calls"
+            aria-label={gt("Model supports tool calls")}
           />
-          Tools
+          <T>Tools</T>
         </label>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="shrink-0">Context</span>
+          <span className="shrink-0">
+            <T>Context</T>
+          </span>
           <Input
             size="compact"
             font="mono"
@@ -338,12 +357,14 @@ function OpenCodeModelFields({
             onChange={(event) =>
               onChange(setModelTokenLimit(draft, "contextLimit", event.target.value))
             }
-            placeholder="Optional"
-            aria-label="Model context window"
+            placeholder={gt("Optional")}
+            aria-label={gt("Model context window")}
           />
         </label>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="shrink-0">Max output</span>
+          <span className="shrink-0">
+            <T>Max output</T>
+          </span>
           <Input
             size="compact"
             font="mono"
@@ -355,28 +376,32 @@ function OpenCodeModelFields({
             onChange={(event) =>
               onChange(setModelTokenLimit(draft, "outputLimit", event.target.value))
             }
-            placeholder="Optional"
-            aria-label="Model maximum output"
+            placeholder={gt("Optional")}
+            aria-label={gt("Model maximum output")}
           />
         </label>
       </div>
       <p className="text-2xs text-muted-foreground">
-        OpenCode needs both token limits together. Leave them blank unless the provider documents
-        them.
+        <T>
+          OpenCode needs both token limits together. Leave them blank unless the provider documents
+          them.
+        </T>
       </p>
       {!isNew && reported ? (
         <p className="text-2xs text-muted-foreground">
-          OpenCode already reports this model. Saving changes only what T3 Code and OpenCode show
-          for it.
+          <T>
+            OpenCode already reports this model. Saving changes only what T3 Code and OpenCode show
+            for it.
+          </T>
         </p>
       ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       <div className="flex gap-2">
         <Button size="sm" variant="outline" onClick={onSave}>
-          Save
+          <T>Save</T>
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
+          <T>Cancel</T>
         </Button>
       </div>
     </div>
@@ -402,6 +427,7 @@ export function OpenCodeProvidersSection({
   usesExternalServer,
   onChange,
 }: OpenCodeProvidersSectionProps) {
+  const gt = useGT();
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(null);
   const [providerDraft, setProviderDraft] = useState<OpenCodeProviderEntry | null>(null);
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -429,7 +455,7 @@ export function OpenCodeProvidersSection({
     if (!providerDraft) return;
     const issues = validateEntry(providerDraft);
     if (issues.length > 0) {
-      setProviderError(issues[0]?.message ?? "Check the provider settings.");
+      setProviderError(issues[0]?.message ?? gt("Check the provider settings."));
       return;
     }
     onChange(upsertOpenCodeProvider(providers, providerDraft));
@@ -449,19 +475,19 @@ export function OpenCodeProvidersSection({
     if (!entry) return;
     const modelId = modelDraft.model.modelId.trim();
     if (modelId.length === 0) {
-      setModelError("Enter a model id.");
+      setModelError(gt("Enter a model id."));
       return;
     }
     // Renaming a model onto another row would silently replace it, so an
     // addition that collides is an error instead.
     if (modelId !== modelDraft.editingModelId && entry.models.some((m) => m.modelId === modelId)) {
-      setModelError(`Model “${modelId}” is already listed.`);
+      setModelError(gt("Model “{modelId}” is already listed.", { modelId }));
       return;
     }
     const next = withOpenCodeProviderModel(entry, { ...modelDraft.model, modelId });
     const issues = validateEntry(next);
     if (issues.length > 0) {
-      setModelError(issues[0]?.message ?? "Check the model settings.");
+      setModelError(issues[0]?.message ?? gt("Check the model settings."));
       return;
     }
     onChange(upsertOpenCodeProvider(providers, next));
@@ -491,7 +517,9 @@ export function OpenCodeProvidersSection({
       <div className="px-3 pb-3 sm:px-4">
         <div className="flex flex-wrap items-center justify-between gap-2 py-1">
           <span className="text-2xs text-muted-foreground">
-            {entry.models.length} configured model{entry.models.length === 1 ? "" : "s"}
+            {gt("{count, plural, one {# configured model} other {# configured models}}", {
+              count: entry.models.length,
+            })}
           </span>
           <Button
             type="button"
@@ -503,12 +531,14 @@ export function OpenCodeProvidersSection({
             }}
           >
             <PlusIcon className="size-3" />
-            Add model
+            <T>Add model</T>
           </Button>
         </div>
         {entry.models.length === 0 ? (
           <p className="py-1 text-xs text-muted-foreground">
-            No models added. OpenCode only offers the models it already knows for this provider.
+            <T>
+              No models added. OpenCode only offers the models it already knows for this provider.
+            </T>
           </p>
         ) : null}
         {/* The "add" form and the per-row editor are the same component;
@@ -553,7 +583,9 @@ export function OpenCodeProvidersSection({
                       {labels.join(" · ")}
                     </span>
                     {isReported ? null : (
-                      <span className="text-2xs text-muted-foreground/70">not connected yet</span>
+                      <span className="text-2xs text-muted-foreground/70">
+                        <T>not connected yet</T>
+                      </span>
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-0.5">
@@ -561,7 +593,7 @@ export function OpenCodeProvidersSection({
                       type="button"
                       size="icon-micro"
                       variant="ghost-muted"
-                      aria-label={`Edit model ${model.modelId}`}
+                      aria-label={gt("Edit model {modelId}", { modelId: model.modelId })}
                       onClick={() => {
                         setModelDraft({
                           providerId: entry.providerId,
@@ -577,7 +609,7 @@ export function OpenCodeProvidersSection({
                       type="button"
                       size="icon-micro"
                       variant="ghost-destructive"
-                      aria-label={`Remove model ${model.modelId}`}
+                      aria-label={gt("Remove model {modelId}", { modelId: model.modelId })}
                       onClick={() => removeModel(entry.providerId, model.modelId)}
                     >
                       <XIcon className="size-3" />
@@ -633,18 +665,18 @@ export function OpenCodeProvidersSection({
             ) : null}
             {issues.length > 0 ? (
               <Badge variant="warning" size="sm" className="shrink-0">
-                Needs attention
+                <T>Needs attention</T>
               </Badge>
             ) : null}
           </Button>
           <span className="shrink-0 text-2xs text-muted-foreground">
-            {entry.models.length} model{entry.models.length === 1 ? "" : "s"}
+            {gt("{count, plural, one {# model} other {# models}}", { count: entry.models.length })}
           </span>
           <Button
             type="button"
             size="icon-micro"
             variant="ghost-destructive"
-            aria-label={`Remove provider ${entry.providerId}`}
+            aria-label={gt("Remove provider {providerId}", { providerId: entry.providerId })}
             onClick={() => removeProvider(entry.providerId)}
           >
             <Trash2Icon className="size-3" />
@@ -682,7 +714,11 @@ export function OpenCodeProvidersSection({
             variant="ghost-muted"
             className="min-w-0 flex-1 justify-start"
             aria-expanded={isExpanded}
-            aria-label={`${isExpanded ? "Hide" : "Show"} models for ${entry.name}`}
+            aria-label={
+              isExpanded
+                ? gt("Hide models for {name}", { name: entry.name })
+                : gt("Show models for {name}", { name: entry.name })
+            }
             onClick={() => setExpandedProviderId(isExpanded ? null : entry.providerId)}
           >
             <ChevronRightIcon
@@ -694,7 +730,9 @@ export function OpenCodeProvidersSection({
             </code>
           </Button>
           <span className="shrink-0 text-2xs text-muted-foreground">
-            {entry.modelIds.length} model{entry.modelIds.length === 1 ? "" : "s"}
+            {gt("{count, plural, one {# model} other {# models}}", {
+              count: entry.modelIds.length,
+            })}
           </span>
           <Button
             type="button"
@@ -712,7 +750,7 @@ export function OpenCodeProvidersSection({
             }}
           >
             <PlusIcon className="size-3" />
-            Add settings
+            <T>Add settings</T>
           </Button>
         </div>
         {isExpanded ? (
@@ -746,13 +784,17 @@ export function OpenCodeProvidersSection({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0 flex-1 space-y-1">
             <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              Providers and models you add here become OpenCode's own configuration. OpenCode
-              connects them, and each model appears in the picker once it does.
+              <T>
+                Providers and models you add here become OpenCode's own configuration. OpenCode
+                connects them, and each model appears in the picker once it does.
+              </T>
             </p>
             {usesExternalServer ? (
               <p className="max-w-xl text-xs leading-normal text-warning">
-                This instance uses a configured OpenCode server. T3 Code cannot change how that
-                server is configured, so entries here only apply to a server T3 Code starts.
+                <T>
+                  This instance uses a configured OpenCode server. T3 Code cannot change how that
+                  server is configured, so entries here only apply to a server T3 Code starts.
+                </T>
               </p>
             ) : null}
           </div>
@@ -760,11 +802,11 @@ export function OpenCodeProvidersSection({
             <Input
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              placeholder="Filter providers"
+              placeholder={gt("Filter providers")}
               size="sm"
               className="w-48 max-w-full"
               spellCheck={false}
-              aria-label="Filter providers"
+              aria-label={gt("Filter providers")}
             />
           ) : null}
           <Button
@@ -778,7 +820,7 @@ export function OpenCodeProvidersSection({
             }}
           >
             <PlusIcon className="size-3" />
-            Add provider
+            <T>Add provider</T>
           </Button>
         </div>
       </div>
@@ -786,7 +828,9 @@ export function OpenCodeProvidersSection({
       {providerDraft ? (
         <div className="border-t border-border/50 bg-muted/20 px-3 py-3 sm:px-4">
           <label className="flex flex-col gap-1 pb-2">
-            <span className="text-2xs text-muted-foreground">Provider id</span>
+            <span className="text-2xs text-muted-foreground">
+              <T>Provider id</T>
+            </span>
             <Input
               size="sm"
               font="mono"
@@ -797,7 +841,7 @@ export function OpenCodeProvidersSection({
                 setProviderDraft({ ...providerDraft, providerId: event.target.value })
               }
               placeholder="my-proxy"
-              aria-label="New provider id"
+              aria-label={gt("New provider id")}
               spellCheck={false}
             />
           </label>
@@ -813,7 +857,7 @@ export function OpenCodeProvidersSection({
           />
           <div className="flex gap-2 px-3 pb-3 sm:px-4">
             <Button size="sm" variant="outline" onClick={saveProviderDraft}>
-              Add provider
+              <T>Add provider</T>
             </Button>
             <Button
               size="sm"
@@ -823,22 +867,26 @@ export function OpenCodeProvidersSection({
                 setProviderError(null);
               }}
             >
-              Cancel
+              <T>Cancel</T>
             </Button>
           </div>
         </div>
       ) : null}
 
-      {visibleConfigured.length > 0 ? <GroupLabel>Configured in T3 Code</GroupLabel> : null}
+      {visibleConfigured.length > 0 ? <GroupLabel>{gt("Configured in T3 Code")}</GroupLabel> : null}
       {visibleConfigured.map(renderConfiguredProvider)}
 
-      {visibleDiscovered.length > 0 ? <GroupLabel>Available through OpenCode</GroupLabel> : null}
+      {visibleDiscovered.length > 0 ? (
+        <GroupLabel>{gt("Available through OpenCode")}</GroupLabel>
+      ) : null}
       {visibleDiscovered.map(renderDiscoveredProvider)}
 
       {Object.keys(providers).length === 0 && unconfiguredDiscovered.length === 0 ? (
         <p className="px-3 pb-3 text-xs text-muted-foreground sm:px-4">
-          OpenCode has not reported any connected providers yet. Enable the instance and refresh to
-          see what it offers.
+          <T>
+            OpenCode has not reported any connected providers yet. Enable the instance and refresh
+            to see what it offers.
+          </T>
         </p>
       ) : null}
     </div>

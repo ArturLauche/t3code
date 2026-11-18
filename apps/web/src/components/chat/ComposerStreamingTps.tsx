@@ -1,5 +1,6 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { Gauge as GaugeIcon } from "lucide-react";
+import { T } from "gt-react";
 import { useEffect, useRef } from "react";
 
 import { readThreadOutputTokenUsage } from "~/state/entities";
@@ -64,7 +65,7 @@ export function ComposerStreamingTps({
         {/* The number changes every tick and is aria-hidden above; announce the
             coarse state once when the row appears instead of the live rate. */}
         <span role="status" className="sr-only">
-          Generating
+          <T>Generating</T>
         </span>
       </ComposerBanner.Content>
     </ComposerBanner.Row>
