@@ -1,0 +1,154 @@
+# Providers
+
+Provider protocols, account ownership, permissions, and capabilities belong at the
+[adapter boundary](../../packages/provider-core/src/server/ProviderAdapter.ts). Orchestration and
+clients read declared capabilities, never provider names.
+
+## Identity and integration shape
+
+- **App IDs are primary; provider IDs are refs.** Never match native provider IDs globally without
+  provider/session/thread scope, and never let child provider turn completions close a parent run.
+- **Route by provider instance, not driver kind.** Session state, catalogs, and credentials belong
+  to a provider instance so two accounts on the same driver cannot share mutable state. Strip
+  ambient credentials the instance did not configure.
+- **Strict ACP compliance for non-first-party agents.** Generic
+  [ACP Registry](../user/providers-acp.md) and local ACP commands follow the ACP specification
+  strictly—never deviate from the spec or add agent-id checks, vendor extensions, or
+  driver-specific workarounds in the shared ACP adapter for non-first-party agents. If an upstream
+  ACP agent deviates from or lacks part of the spec, let orchestration degrade through capabilities
+  rather than special-casing it here. Dedicated ACP flavors (over `packages/provider-acp`) are
+  reserved for first-party drivers that need behavior outside the ACP spec; native
+  `ProviderAdapterV2` adapters are only for non-ACP protocols.
+- **Package boundaries.** Providers live in `packages/provider-<name>` (see
+  [Pi](../../packages/provider-pi) as reference). Server code imports only
+  `@t3tools/provider-core/server/*`, contracts, and shared, reaching host capabilities through
+  `ProviderHost` rather than `apps/server`. Client definitions (`./client`) must stay browser- and
+  React Native-safe.
+
+## Honest capabilities and permissions
+
+- **Declare only what the provider actually supports.** Turn off fork, rollback, steering, or
+  subagent capabilities the provider lacks so orchestration degrades cleanly (for example, portable
+  context handoff for forks). A capability left enabled that fails at runtime is a bug.
+- **Never emulate missing permission modes.** Expose only modes the provider enforces natively; do
+  not fake a mode by auto-answering approvals in T3. Unoffered stored modes fall back to Supervised.
+  Pass native approval and question option IDs through unchanged, and ensure every request can be
+  declined.
+- **Hide plan mode unless it produces proposed-plan cards.**
+- **Startup phases come from real signals.** An adapter reports the step a starting turn is on as
+  `startupPhase` on its provider session, and only when the protocol says so: a notification or an
+  awaited request with one meaning, never a timer. Clear it the moment the provider can be doing
+  something else. Clients show it until the run's first output. A session that serves several
+  threads names the one it describes with `startupPhaseThreadId`.
+  Nothing an adapter emits during `openSession` is visible, because the session is not attached yet.
+  Turn start republishes `runtime.providerSession`, so a phase that spans it must be on that record.
+- **Reject conversation rollback before touching files** when the provider cannot roll back its
+  conversation (see [checkpoints](./01_architecture.md#turn-completion-and-checkpoints)).
+
+## Process, setup, and security boundaries
+
+- **Health checks must stay passive.** Background status and model probes must never open a session
+  that starts MCP servers, runs hooks, or launches a login flow. Reserve heavier probes for explicit
+  refresh or setup.
+- **Updates run only through a provably owning installer.** Prove ownership from the resolved
+  executable path (or use a self-updater that checks its own install); leave ambiguous, pinned, or
+  read-only installs (such as Nix) manual-only.
+- **Attachments stay outside the project workspace.** Never copy uploads into the project tree to
+  bypass a provider's sandbox or approval rules.
+- **T3 MCP tools.** Inject the thread's authenticated MCP server so agents can reach T3 tools, and
+  keep turns working if that server is unreachable.
+
+## Model manifest
+
+The bundled [`model-manifest.json`](../../apps/server/src/provider/model-manifest.json) enables
+offline startup while remote fetches from `main` update metadata between releases. A bundled
+manifest outranks the cached remote copy by `updatedAt`, so **bump `updatedAt` on every edit**.
+Declare broken-version minimums in the manifest policy rather than as driver constants.
+
+`compatibility` declares which CLI versions a provider is known to work with. An
+entry that has no characterized version must say so with `"uncharacterized": true`
+and an empty `ranges`, which the schema requires and which suppresses the
+advisory entirely. An empty `ranges` list without the marker does not: it resolves
+to a permanent `unknown` advisory, which satisfies the "every built-in has a
+policy" test while warning about nothing. Freebuff is the current example — its
+TUI bridge is a screen-scraping integration whose behaviour has not been pinned to
+version ranges.
+Test catalog
+and adapter semantics with synthetic model names so adding a model never requires duplicating config
+in tests.
+
+## Cline speaks ACP, and its ACP build is narrower than the CLI
+
+[Cline](https://cline.bot) is integrated over `cline --acp` — newline-delimited JSON-RPC 2.0 on
+stdio. Three properties of that build shape the whole integration, and each is a place a future
+maintainer will otherwise get wrong:
+
+**Authentication is never requested.** Cline's ACP `authenticate` starts a device-code OAuth
+flow: it writes a URL to stderr, tries to open a browser, and then blocks until someone finishes
+it. On a T3 server that browser opens on a machine the user is not sitting at, and the request
+never returns. The runtime therefore leaves `authMethodId` unset for Cline and reads
+authentication out of the session-setup answer instead.
+
+Do not assume the guard is always a well-formed response, even though that is the verified shape.
+Against Cline 3.0.65 an unauthenticated CLI answers `session/new` with
+`-32000 {"message":"Authentication required: Call authenticate before starting a session"}`, and
+that is the path the live probe exercises. A build that gives up earlier yields no request error at
+all: it can print the guard to stderr and exit, which surfaces as an `AcpProcessExitedError`, or
+fail so early that only a thrown defect carries text. The classifier reads all three, and is
+deliberately narrow about each: `-32000` is a generic ACP code, so the method and the message wording
+must both line up, and anything that reads like a startup failure (`spawn`, `ENOENT`, `not found`)
+stays a broken install even when it mentions the API key.
+See [Cline ACP support](../../apps/server/src/provider/acp/ClineAcpSupport.ts).
+
+**The model option cannot be found by category.** Cline advertises its provider picker with
+`category: "model"` and lists it _before_ the model picker, so the shared "first model-category
+option" lookup resolves to `provider` and `session/set_config_option` would change the account
+instead of the model. Cline resolves its own option id. The same call rejects a selection outside
+the advertised catalog, because `session/set_model` accepts any string on this build.
+
+**Tool approval has exactly one knob.** Cline exposes a single `auto_approve` boolean: no per-tool
+policies, nothing between "ask about everything" and "approve everything". T3 therefore accepts only
+`Supervised` and `Full access`, and implements the difference in its own permission handler rather
+than by writing that boolean: Supervised asks the user through the normal approval event, and Full
+access answers each request with Cline's own accept option. Cline does not remember a previous
+"allow always", so Full access re-approves every request instead of pretending the CLI learned the
+answer. The two in-between T3 modes are declared unsupported on the snapshot rather than silently
+widened. See [Cline provider](../../apps/server/src/provider/ClineProvider.ts).
+
+Three more limits are declared the same way instead of being discovered at send time. Cline
+advertises `promptCapabilities.image: true` and then discards every non-text block before
+dispatch, so the snapshot reports no image support and the adapter refuses attachments. It binds
+its mode on the _first_ prompt, so a mid-thread switch to Plan would still allow file edits;
+Plan is therefore unsupported and the interaction-mode toggle is hidden. And it hard-disables
+reasoning, so no thinking level is offered.
+
+Cline stores the ACP `mcpServers` field and never loads those servers, so the adapter declares
+`consumesMcpServers: false` and the server does not mint an MCP credential for the session.
+Configure MCP on the Cline side instead. Background text generation is withheld the same way:
+titles, branch names and commit messages go to another provider.
+
+## Cross-provider traps and testing
+
+Prove adapter behavior with replay fixtures recorded from the real provider and replayed through the
+real orchestrator, adapter, and projections. Hand-written protocol frames guess at wire behavior; use
+unit tests for pure logic and failure paths a real provider cannot trigger on demand.
+
+Traps that have broken multiple adapters:
+
+- **Lazy config advertisement.** Providers often advertise options only after a session opens or a
+  model runs. Wait for advertisement before applying settings, and skip unoffered stored options
+  rather than failing.
+- **`"Default"` is a sentinel, not a model ID.** Never send it to a provider; clear or reset the
+  session's model selection instead.
+- **Early Stop.** Cancelling before the provider registers the prompt can be ignored or strand a
+  session. Gate cancellation on the provider's turn-started signal.
+- **Work outliving a turn.** Background tasks, subagents, and provider-initiated continuations can
+  report after T3's turn settles. Route subagent updates by subagent (not active run), request
+  continuations when needed, and report pending background work so idle cleanup does not kill the
+  session.
+- **Terminal settlement.** Every terminal path (completion, Stop, provider error, process exit) must
+  settle open tool calls, subagents, and pending requests.
+- **Usage limits.** Classify quota/rate-limit errors as `usage_limit` (with reset time when
+  available) rather than generic failures.
+- **Symlinked workspaces.** Test symlinked paths (such as macOS `/tmp`); providers that compare
+  canonical paths break if cwd handling disagrees.
