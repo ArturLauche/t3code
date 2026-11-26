@@ -26,6 +26,11 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
   [WS_METHODS.previewStopLocalServer]: AuthTerminalOperateScope,
+  // Sticky terminal sessions spawn PTYs and edit persisted state like terminal operations.
+  // The list read stays unguarded, like the other terminal reads; the server still authorizes it.
+  [WS_METHODS.terminalSessionCreate]: AuthTerminalOperateScope,
+  [WS_METHODS.terminalSessionRename]: AuthTerminalOperateScope,
+  [WS_METHODS.terminalSessionDelete]: AuthTerminalOperateScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   // Restarts the server, as an update does.
   [WS_METHODS.serverReclaimDatabaseSpace]: AuthEnvironmentMaintainScope,

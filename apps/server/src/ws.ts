@@ -35,6 +35,7 @@ import {
   type AuthAccessStreamEvent,
   AuthOrchestrationOperateScope,
   AuthTerminalOperateScope,
+  AuthTerminalReadScope,
   AuthProvidersManageScope,
   type AuthEnvironmentScope,
   ProviderDriverKind,
@@ -107,6 +108,8 @@ import {
   EnvironmentAuthorizationError,
   ThreadId,
   type TerminalMetadataStreamEvent,
+  DEFAULT_TERMINAL_ID,
+  type TerminalOpenInput,
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
@@ -209,6 +212,7 @@ import { invalidateSettingsSecrets } from "./sourceControl/sourceControlHostSecr
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as TerminalSessionRegistry from "./terminal/SessionRegistry.ts";
 import { makePrepareTerminalLaunch } from "./workspace/restoreMissingWorktree.ts";
 import { terminalOutputStream, withOutputWindow } from "./terminal/OutputProtocol.ts";
 import { withSocketHeartbeat } from "./socketHeartbeat.ts";
@@ -1570,6 +1574,7 @@ export const layerWsRpc = (
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
+      const terminalSessionRegistry = yield* TerminalSessionRegistry.TerminalSessionRegistry;
       const prepareTerminalLaunch = yield* makePrepareTerminalLaunch(
         threadManagement.getThreadShell,
       );
@@ -3488,6 +3493,55 @@ export const layerWsRpc = (
           terminalManager.resize(input, terminalViewerId(metadata)),
         [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
         [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
+        [WS_METHODS.terminalSessionsList]: () =>
+          authorizeEffect(AuthTerminalReadScope, terminalSessionRegistry.list()).pipe(
+            Effect.map((sessions) => ({ sessions })),
+          ),
+        [WS_METHODS.terminalSessionCreate]: (input) =>
+          authorizeEffect(AuthTerminalOperateScope, terminalSessionRegistry.create(input)).pipe(
+            Effect.tap((record) => {
+              const launchInput: TerminalOpenInput = {
+                threadId: record.id,
+                terminalId: DEFAULT_TERMINAL_ID,
+                cwd: record.cwd,
+                worktreePath: record.worktreePath,
+                ...(record.providerInstanceId !== undefined
+                  ? { providerInstanceId: record.providerInstanceId }
+                  : {}),
+                ...(input.env !== undefined ? { env: input.env } : {}),
+              };
+              return prepareTerminalLaunch(launchInput).pipe(
+                Effect.flatMap((launch) =>
+                  terminalManager
+                    .open(launch.input)
+                    .pipe(
+                      Effect.provideService(TerminalManager.TerminalCwdRecovery, launch.recover),
+                    ),
+                ),
+                Effect.catch((error) =>
+                  Effect.logWarning("failed to open sticky terminal session", {
+                    sessionId: record.id,
+                    error,
+                  }),
+                ),
+              );
+            }),
+          ),
+        [WS_METHODS.terminalSessionRename]: (input) =>
+          authorizeEffect(AuthTerminalOperateScope, terminalSessionRegistry.rename(input)),
+        [WS_METHODS.terminalSessionDelete]: (input) =>
+          authorizeEffect(
+            AuthTerminalOperateScope,
+            terminalManager.close({ threadId: input.id, deleteHistory: true }).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("failed to close sticky terminal session", {
+                  sessionId: input.id,
+                  error,
+                }),
+              ),
+              Effect.andThen(terminalSessionRegistry.remove(input)),
+            ),
+          ),
         [WS_METHODS.terminalObserve]: (input) =>
           terminalOutputStream(
             (listener, registerCleanup) =>

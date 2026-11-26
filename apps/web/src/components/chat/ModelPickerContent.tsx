@@ -369,6 +369,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onFocusEffort?: () => void;
   /** Closes the list column, inside the popup's fixed height. */
   listFooter?: ReactNode;
+  /** Offered as a pseudo-provider in the sidebar rail: starts a sticky terminal session. */
+  onSelectTerminal?: () => void;
 }) {
   const gt = useGT();
   const messages = useMessages();
@@ -695,7 +697,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return [...available, ...disabled];
   })();
-  const showSidebar = !isSearching && sidebarInstanceEntries.length > 0;
+  const showSidebar =
+    !isSearching && (sidebarInstanceEntries.length > 0 || props.onSelectTerminal !== undefined);
   const instanceOrder = instanceEntries.map((entry) => entry.instanceId);
 
   const filteredModels = (() => {
@@ -991,6 +994,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       "{provider} is unavailable in this thread. Start a new thread to switch providers.",
                       { provider: entry.displayName },
                     ),
+                }
+              : {})}
+            {...(props.onSelectTerminal
+              ? {
+                  onSelectTerminal: () => {
+                    onRequestClose?.();
+                    props.onSelectTerminal?.();
+                  },
                 }
               : {})}
           />

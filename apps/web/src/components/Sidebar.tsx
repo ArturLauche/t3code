@@ -87,7 +87,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { type AnyRouter, useRouter } from "@tanstack/react-router";
+import { type AnyRouter, useParams, useRouter } from "@tanstack/react-router";
 
 import {
   isAtomCommandInterrupted,
@@ -280,6 +280,8 @@ import {
   useDraftTerminalLabels,
   useSidebarDrafts,
 } from "./sidebar/SidebarDraftBlock";
+import { SidebarTerminalSessions } from "./sidebar/SidebarTerminalSessions";
+import type { StickyTerminalSessionEntry } from "../state/terminalSessions";
 import {
   SidebarProjectFolderHeader,
   sidebarFolderRowId,
@@ -1215,6 +1217,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       : { projectIds: scopedProjectRefs.map((projectRef) => projectRef.projectId) },
   );
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
+  const routeTerminalSessionKey = useParams({
+    strict: false,
+    select: (params) =>
+      params.environmentId !== undefined && params.sessionId !== undefined
+        ? `${params.environmentId}:${params.sessionId}`
+        : null,
+  });
+  const terminalSessionEnvironmentIdsKey = [...environmentLabelById.keys()].toSorted().join("\n");
+  const terminalSessionEnvironmentIds =
+    terminalSessionEnvironmentIdsKey === ""
+      ? []
+      : (terminalSessionEnvironmentIdsKey.split("\n") as EnvironmentId[]);
   const draftTerminalLabels = useDraftTerminalLabels();
   const visibleDraftSessionCount = useComposerDraftStore((store) => {
     let count = 0;
@@ -1534,6 +1548,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       setOpenMobile(false);
     }
     void router.navigate({ to: "/draft/$draftId", params: { draftId } });
+  };
+
+  const navigateToTerminalSession = (entry: StickyTerminalSessionEntry) => {
+    clearSelection();
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    return router.navigate({
+      to: "/$environmentId/terminal/$sessionId",
+      params: { environmentId: entry.environmentId, sessionId: entry.record.id },
+    });
   };
 
   const clearThreadSearch = () => {
@@ -3619,6 +3644,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         routeDraftId={routeDraftIdForRows}
                         onNavigateToDraft={navigateToDraft}
                         onDraftContextMenu={handleDraftContextMenu}
+                      />,
+                      <SidebarTerminalSessions
+                        key="terminal-sessions"
+                        environmentIds={terminalSessionEnvironmentIds}
+                        projectDisplayNameByKey={projectDisplayNameByKey}
+                        environmentLabelById={environmentLabelById}
+                        routeSessionKey={routeTerminalSessionKey}
+                        onNavigate={navigateToTerminalSession}
+                        onDeletedActive={() => void router.navigate({ to: "/" })}
                       />,
                     ];
                     for (const item of sidebarListItems) {

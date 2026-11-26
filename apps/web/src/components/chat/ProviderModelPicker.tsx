@@ -122,6 +122,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerDetail?: string | null;
   /** Composer shortcuts this trigger answers besides the picker's own. */
   triggerShortcuts?: string;
+  /** Offered as a pseudo-provider in the picker rail: starts a sticky terminal session. */
+  onSelectTerminal?: () => void;
   /**
    * Docks an effort column beside the list and a footer under both. The popup then stays open
    * until Escape or an outside press, and picking a model moves focus to its levels.
@@ -319,6 +321,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           : (props.getModelDisabledReason?.(instanceId, model) ?? null)
       }
       onInstanceModelChange={handleInstanceModelChange}
+      {...(props.onSelectTerminal ? { onSelectTerminal: props.onSelectTerminal } : {})}
       {...(docked
         ? {
             docked,
