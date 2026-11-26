@@ -1635,7 +1635,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         },
       });
       // The pre-compaction step would otherwise settle the turn as its newest usage.
-      if (status === "completed") turn.lastStep = undefined;
+      if (status === "completed") {
+        turn.lastStep = undefined;
+        if (turn.providerTurn.tokenUsage !== undefined) {
+          turn.providerTurn = { ...turn.providerTurn, tokenUsage: undefined };
+          yield* emitProviderTurn(turn, turn.providerTurn);
+        }
+      }
       if (status === "completed" && state.providerThread.contextUsage !== null) {
         state.providerThread = {
           ...state.providerThread,
@@ -1715,6 +1721,46 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         providerTurn,
         ...(providerTurn.completedAt === null ? {} : retainedRequestsOf(turn)),
       });
+
+    // The context a turn has filled so far, read from the last step OpenCode
+    // reported. The meter needs it while the turn runs: a turn that ends after
+    // minutes of work would otherwise leave the window empty until it is over.
+    const emitContextUsage = Effect.fnUntraced(function* (turn: ActiveTurn) {
+      const lastStep = turn.lastStep;
+      if (lastStep === undefined) return;
+      const inputTokens = lastStep.input + lastStep.cache.read + lastStep.cache.write;
+      // A step that failed reports nothing, and a reading without input would
+      // empty the meter the work so far filled.
+      if (inputTokens <= 0) return;
+      const previous = turn.providerTurn.tokenUsage;
+      const usedTokens = inputTokens + lastStep.output;
+      // The context only grows while a turn runs, so a smaller reading is a
+      // step that reported less and never replaces the one the meter shows.
+      if (previous !== undefined && usedTokens < previous.usedTokens) return;
+      const window = windowOf(turn.input.runtimePolicy.cwd, turn.input.modelSelection.model);
+      const tokenUsage = {
+        usedTokens,
+        maxTokens: window ?? null,
+        inputTokens,
+        cachedInputTokens: lastStep.cache.read,
+        outputTokens: lastStep.output,
+        reasoningOutputTokens: lastStep.reasoning,
+        updatedAt: DateTime.formatIso(yield* DateTime.now),
+      };
+      if (
+        previous !== undefined &&
+        previous.usedTokens === tokenUsage.usedTokens &&
+        previous.maxTokens === tokenUsage.maxTokens &&
+        previous.inputTokens === tokenUsage.inputTokens &&
+        previous.cachedInputTokens === tokenUsage.cachedInputTokens &&
+        previous.outputTokens === tokenUsage.outputTokens &&
+        previous.reasoningOutputTokens === tokenUsage.reasoningOutputTokens
+      ) {
+        return;
+      }
+      turn.providerTurn = { ...turn.providerTurn, tokenUsage };
+      yield* emitProviderTurn(turn, turn.providerTurn);
+    });
 
     const makeTurn = (
       owner: TurnOwner,
@@ -2406,6 +2452,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     ) {
       const turn = state.active;
       if (turn === undefined) return;
+      const promptDropped = terminal.status === "interrupted" && turn.unsent;
       state.active = undefined;
       for (const inboxID of turn.steers) state.strandedSteers.add(inboxID);
       for (const entry of pending.values()) {
@@ -2472,6 +2519,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         ...turn.providerTurn,
         status: terminal.status,
         completedAt,
+        ...(promptDropped ? { promptDropped: true } : {}),
         turnTokenUsage: turnTokenUsage(turn, terminal.status),
         ...(lastStep === undefined
           ? {}
@@ -2525,6 +2573,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         providerTurnId: turn.providerTurn.id,
         runOrdinal: turn.input.runOrdinal,
         threadDisposition,
+        ...(promptDropped ? { promptDropped: true as const } : {}),
         ...retainedRequestsOf(turn),
       };
       yield* emit(
@@ -2540,10 +2589,6 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             }
           : { ...base, status: terminal.status, failure: null },
       );
-      // Cold servers list models lazily; refresh unknown windows off-stream for the next turn.
-      if (window === undefined) {
-        yield* Effect.forkIn(readModels(directoryOf(turn.input.runtimePolicy.cwd)), sessionScope);
-      }
     });
 
     // OpenCode waits forever on unanswered requests; stop that run and keep its end from settling the next.
@@ -3057,13 +3102,16 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           const tokens = event.data.tokens;
           if (tokens === undefined) return;
           turn.steps += 1;
-          turn.lastStep = tokens;
-          turn.usage.input += tokens.input + tokens.cache.read + tokens.cache.write;
+          const inputTokens = tokens.input + tokens.cache.read + tokens.cache.write;
+          // A step that failed before the model answered reports no context,
+          // so it does not replace the step the meter reads.
+          if (inputTokens > 0) turn.lastStep = tokens;
+          turn.usage.input += inputTokens;
           turn.usage.cached += tokens.cache.read;
           turn.usage.cacheWrite += tokens.cache.write;
           turn.usage.output += tokens.output + tokens.reasoning;
           turn.usage.reasoning += tokens.reasoning;
-          return;
+          return yield* emitContextUsage(turn);
         }
         case "session.retry.scheduled":
           return yield* updateRetry(state, turn, event.data, event.data.at - event.created);
@@ -4557,6 +4605,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       state.active = turn;
       state.sessionScopedBackground = false;
       yield* emitProviderTurn(turn, providerTurn);
+      // A spawned server lists its models lazily, so a window that is still
+      // unknown is read again while the turn runs, off this stream so it
+      // never delays one. The reading the turn ends with then carries the
+      // window the catalog named.
+      if (windowOf(turnInput.runtimePolicy.cwd, turnInput.modelSelection.model) === undefined) {
+        yield* Effect.forkIn(readModels(directoryOf(turnInput.runtimePolicy.cwd)), sessionScope);
+      }
       state.providerThread = {
         ...state.providerThread,
         status: "active",
@@ -4741,8 +4796,10 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     // OpenCode 2.2.5 answers its model list only once the scan has ended (observed, not documented).
     const skillsMentioned = Effect.fnUntraced(function* (
       location: { readonly directory: string },
-      mentions: ReadonlyArray<string>,
+      text: string,
     ) {
+      const mentions = skillMentions(text);
+      if (mentions.length === 0) return [];
       const known = yield* listSkills(location);
       if (mentions.some((name) => !known.has(name))) {
         yield* readModels(location.directory);
@@ -4846,8 +4903,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           );
         }
       }
-      const mentions = skillMentions(text);
-      const skills = mentions.length === 0 ? [] : yield* skillsMentioned(location, mentions);
+      const skills = yield* skillsMentioned(location, text);
       const files = yield* promptFiles(turnInput.message.attachments);
       const messageText = turnInput.resume ? "" : yield* promptText(turnInput);
       if (!sending()) return;
@@ -5187,7 +5243,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           if (turn.settledInbox.has(inboxID)) return;
           turn.steers.add(inboxID);
           state.strandedSteers.delete(inboxID);
-          const { files, messageText } = yield* Effect.gen(function* () {
+          const { files, messageText, skills } = yield* Effect.gen(function* () {
             const files = yield* promptFiles(steerInput.message.attachments);
             const messageText = (yield* providerMessageTextWithAttachmentPaths({
               text: steerInput.message.text,
@@ -5195,7 +5251,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               resolveAttachmentPath: host.resolveAttachmentPath,
               resolveExtractedTextPath: host.resolveExtractedTextPath,
             })).trim();
-            return { files, messageText };
+            const skills = yield* skillsMentioned(
+              { directory: directoryOf(turn.input.runtimePolicy.cwd) },
+              steerInput.message.text,
+            );
+            return { files, messageText, skills };
           }).pipe(
             Effect.onInterrupt(() =>
               lock.withPermit(
@@ -5232,6 +5292,9 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               id: inboxID,
               text: messageText,
               ...(files.length === 0 ? {} : { files }),
+              ...(skills.length === 0
+                ? {}
+                : { skills: skills.map((id) => ({ id: Skill.ID.make(id) })) }),
               delivery: "steer",
             })
             .pipe(
