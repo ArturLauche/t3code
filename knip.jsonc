@@ -76,7 +76,6 @@
       "ignoreDependencies": [
         "@effect/platform-node-shared",
         "@t3tools/web",
-        "@napi-rs/keyring",
         "ffi-rs",
         // Cloud vendor SDKs are dynamically imported by @t3tools/cloud-runtime, but
         // the published server bundle resolves them from this package's manifest.

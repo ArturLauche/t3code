@@ -9,6 +9,7 @@ import type {
   ProviderDriverKind,
   ResolvedProviderInstanceEnvironment,
   ProviderInstanceId,
+  ProviderRuntimeModeLimit,
   ServerProvider,
   ServerProviderWorkspaceSnapshot,
 } from "@t3tools/contracts";
@@ -27,6 +28,8 @@ import type { ProviderUsageReader } from "./usage.ts";
 
 export interface ProviderDriverMetadata {
   readonly displayName: string;
+  /** Unlabeled snapshots leave displayName out instead of reporting this one. */
+  readonly snapshotOmitsDisplayName?: boolean;
   /** Defaults to true; false rejects multiple instances of a global resource. */
   readonly supportsMultipleInstances?: boolean;
   /** Whether this driver's process protocol can run in a cloud sandbox. */
@@ -53,6 +56,13 @@ export interface ProviderInstance {
   readonly snapshotForCwd?: (
     cwd: string,
   ) => Effect.Effect<ProviderWorkspaceSnapshot, ProviderDriverError>;
+  /**
+   * Modes this instance offers that cannot run in `cwd`. Must stay cheap: clients ask whenever a
+   * mode picker opens, so read configuration and never start the provider.
+   */
+  readonly runtimeModeLimitsForCwd?: (
+    cwd: string,
+  ) => Effect.Effect<ReadonlyArray<ProviderRuntimeModeLimit>>;
   /**
    * Cwds whose workspace skills or models may have changed. The registry rescans only cwds already
    * requested. The stream must end when the instance is torn down.
