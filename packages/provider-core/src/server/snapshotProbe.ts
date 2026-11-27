@@ -118,6 +118,8 @@ export interface ServerProviderPresentation {
   readonly requiresNewThreadForModelChange?: boolean;
   readonly supportsConversationRollback?: boolean;
   readonly supportsTextGeneration?: boolean;
+  /** The provider's session is an interactive terminal rather than a turn runtime. */
+  readonly terminal?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -332,6 +334,9 @@ export function buildServerProvider(input: {
       : {}),
     ...(typeof input.presentation.supportsTextGeneration === "boolean"
       ? { supportsTextGeneration: input.presentation.supportsTextGeneration }
+      : {}),
+    ...(typeof input.presentation.terminal === "boolean"
+      ? { terminal: input.presentation.terminal }
       : {}),
     ...(typeof input.presentation.reportsContextWindow === "boolean"
       ? { reportsContextWindow: input.presentation.reportsContextWindow }

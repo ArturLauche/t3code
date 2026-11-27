@@ -6,6 +6,7 @@ import {
   FreebuffSettings,
   isProviderDriverKind,
   ProviderDriverKind,
+  TerminalSettings,
 } from "@t3tools/contracts";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
 import {
@@ -69,6 +70,26 @@ const freebuffClient = defineProviderClient({
   },
 });
 
+const terminalClient = defineProviderClient({
+  driverKind: ProviderDriverKind.make("terminal"),
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- provider label stays English, same as upstream labels
+  label: "Terminal",
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- provider badge stays English, same as upstream badges
+  badgeLabel: "Sticky",
+  settingsSchema: TerminalSettings,
+  supportsCloudExecution: false,
+  hasDefaultInstance: true,
+  icon: {
+    viewBox: "0 0 24 24",
+    fill: { light: "currentColor", dark: "currentColor" },
+    paths: [
+      { d: "M3 5.5 L21 5.5 L21 18.5 L3 18.5 Z" },
+      { d: "M6.5 9.5 L9.5 12 L6.5 14.5" },
+      { d: "M11.5 14.5 L16 14.5" },
+    ],
+  },
+});
+
 // OpenRouter's Ink and Cloud glyphs from https://openrouter.ai/brand.
 export const openRouterIcon: ProviderIcon = {
   viewBox: "0 0 1024 730",
@@ -98,6 +119,7 @@ export const providerClients = makeProviderClientRegistry([
   cursorClient,
   clineClient,
   freebuffClient,
+  terminalClient,
   grokClient,
   fxClient,
   openCodeClient,

@@ -28,6 +28,7 @@ import {
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_MODEL,
+  DEFAULT_TERMINAL_ID,
   type EnvironmentId,
   type ModelSelection,
   type PreviewAnnotationPayload,
@@ -37,6 +38,7 @@ import {
   type ThreadId,
   ProviderInteractionMode,
   RuntimeMode,
+  TERMINAL_DEFAULT_MODEL,
 } from "@t3tools/contracts";
 import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
 import {
@@ -135,6 +137,7 @@ import { useLinkedEnvironments } from "../../state/peerLinks";
 import { readEnvironmentScope } from "../../state/session";
 import { ensureWorktreeLayoutApproved } from "../../worktreeLayoutApproval";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { useTerminalUiStateStore } from "../../terminalUiStateStore";
 import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   threadContextsOutsideEnvironment,
@@ -394,6 +397,9 @@ export function useComposerSend(input: ComposerSendInput) {
   const navigate = useNavigate();
   const clientSettingsHydrated = useClientSettingsHydrated();
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
+    reportFailure: false,
+  });
+  const createThread = useOrchestrationCommand(threadEnvironment.create, {
     reportFailure: false,
   });
   const uploadThreadFeedback = useOrchestrationCommand(threadEnvironment.uploadFeedback, {
@@ -1011,6 +1017,61 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     const threadIdForSend = activeThread.id;
+    // A terminal provider turns the draft into a persistent terminal thread
+    // instead of a model turn: create the thread with no message and open its
+    // terminal. The thread and its PTY then survive restarts like any thread.
+    const terminalInstance = sendCtx
+      ? providerInstanceEntries.find(
+          (entry) =>
+            entry.instanceId === sendCtx!.selectedModelSelection.instanceId &&
+            entry.snapshot.terminal === true,
+        )
+      : undefined;
+    if (terminalInstance && isLocalDraftThread && !directAnnotation) {
+      const terminalModelSelection = createModelSelection(
+        terminalInstance.instanceId,
+        TERMINAL_DEFAULT_MODEL,
+        [],
+      );
+      const created = await createThread({
+        environmentId,
+        input: {
+          threadId: threadIdForSend,
+          projectId: activeProject.id,
+          title: promptAtSend.trim().slice(0, 80) || m(msg("Terminal")),
+          modelSelection: terminalModelSelection,
+          runtimeMode: "full-access",
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+        },
+      });
+      if (created._tag === "Failure") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: m(msg("Could not start terminal")),
+            description: m(msg("The terminal thread could not be created.")),
+          }),
+        );
+        return;
+      }
+      markPromotedDraftThreadByRef(scopeThreadRef(environmentId, threadIdForSend));
+      clearComposerDraftContent(composerDraftTarget);
+      if (currentRouteThreadKeyRef.current === routeThreadKey) {
+        promptRef.current = "";
+        composerRef.current?.resetCursorState();
+      }
+      const terminalThreadRef = scopeThreadRef(environmentId, threadIdForSend);
+      useTerminalUiStateStore
+        .getState()
+        .ensureTerminal(terminalThreadRef, DEFAULT_TERMINAL_ID, { open: true, active: true });
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId, threadId: threadIdForSend },
+      });
+      return;
+    }
     const sendSnapshot = snapshotComposerSend({
       prompt: promptForSend,
       images: composerImages,

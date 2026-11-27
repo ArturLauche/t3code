@@ -305,6 +305,11 @@ export const OrchestrationV2SessionCapabilities = Schema.Struct({
   supportsProviderSwitchingViaHandoff: Schema.Boolean,
   supportsRuntimeModeSwitchInSession: Schema.Boolean,
   pendingRequestsSurviveRestart: Schema.Boolean,
+  /**
+   * The session is a persistent interactive terminal, not a model turn runtime.
+   * Terminal threads never start turns; clients drive the PTY directly.
+   */
+  terminal: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2SessionCapabilities = typeof OrchestrationV2SessionCapabilities.Type;
 
