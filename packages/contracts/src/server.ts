@@ -277,6 +277,11 @@ export const ServerProvider = Schema.Struct({
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),
+  /**
+   * The provider's session is an interactive terminal rather than a model turn
+   * runtime. Clients render the thread's terminal as its primary surface.
+   */
+  terminal: Schema.optional(Schema.Boolean),
   setup: Schema.optional(
     Schema.Struct({
       canAuthenticate: Schema.Boolean,

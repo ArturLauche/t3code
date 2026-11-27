@@ -130,6 +130,7 @@ const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const FREEBUFF_DRIVER_KIND = ProviderDriverKind.make("freebuff");
 const CLINE_DRIVER_KIND = ProviderDriverKind.make("cline");
+export const TERMINAL_DRIVER_KIND = ProviderDriverKind.make("terminal");
 
 export const DEFAULT_MODEL = "gpt-6-astra";
 
@@ -144,6 +145,8 @@ export const DEFAULT_TEXT_GENERATION_MODEL = "gpt-6-luna";
 export const ANTIGRAVITY_DEFAULT_MODEL = "antigravity-default";
 /** Freebuff chooses its active model inside the TUI; T3 keeps one opaque alias. */
 export const FREEBUFF_DEFAULT_MODEL = "freebuff-default";
+/** A terminal thread has no model; this opaque alias keeps the selection routable. */
+export const TERMINAL_DEFAULT_MODEL = "terminal-default";
 export const DEFAULT_TEXT_GENERATION_REASONING_EFFORT = "low";
 
 /** Let Muse pick the account's default model. Never send this ID to Muse. */
@@ -164,6 +167,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [PI_DRIVER_KIND]: "default",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
   [FREEBUFF_DRIVER_KIND]: FREEBUFF_DEFAULT_MODEL,
+  [TERMINAL_DRIVER_KIND]: TERMINAL_DEFAULT_MODEL,
   [ProviderDriverKind.make("antigravity")]: ANTIGRAVITY_DEFAULT_MODEL,
 };
 
@@ -217,4 +221,5 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CLINE_DRIVER_KIND]: "Cline",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
   [FREEBUFF_DRIVER_KIND]: "Freebuff",
+  [TERMINAL_DRIVER_KIND]: "Terminal",
 };

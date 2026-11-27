@@ -62,6 +62,7 @@ import { resolveWorktreeRepositorySelection } from "@t3tools/client-runtime/stat
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { getUnsupportedProviderModeReason } from "@t3tools/shared/providerCapabilities";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
 import { heldComposerSendBannerItem } from "./chat/ComposerHeldSendBanner";
@@ -1457,6 +1458,16 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
+  // A terminal thread's session is its persistent PTY, not the chat timeline.
+  const isTerminalThread = activeProviderStatus?.terminal === true;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the thread's persistent terminal and gives it the full column once it becomes the active terminal thread
+  useEffect(() => {
+    if (!isTerminalThread) return;
+    const threadRef = scopeThreadRef(environmentId, threadId);
+    const store = useTerminalUiStateStore.getState();
+    store.ensureTerminal(threadRef, DEFAULT_TERMINAL_ID, { open: true, active: true });
+    store.setTerminalHeight(threadRef, Number.MAX_SAFE_INTEGER);
+  }, [isTerminalThread, environmentId, threadId]);
   // Surface a provider that cannot enforce the thread's access mode before the
   // send. Plan mode is gone upstream, so only the access mode narrows a turn.
   const unsupportedProviderCapability = getUnsupportedProviderModeReason({
@@ -3813,11 +3824,12 @@ export default function ChatView(props: ChatViewProps) {
               }}
               inert={isRevertingCheckpoint}
               data-chat-composer-overlay="true"
-              className={
+              className={cn(
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center [@media(max-height:34rem)]:items-end"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
-              }
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2",
+                isTerminalThread && "hidden",
+              )}
             >
               <div ref={draftHeroTransitionGroupRef} className="chat-composer-lane w-full">
                 <div
