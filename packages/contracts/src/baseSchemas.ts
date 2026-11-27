@@ -358,6 +358,9 @@ export const ScheduledTaskId = makeEntityId("ScheduledTaskId");
 export const SecretRef = makeEntityId("SecretRef");
 export type SecretRef = typeof SecretRef.Type;
 export type ScheduledTaskId = typeof ScheduledTaskId.Type;
+/** A persisted terminal session; its id doubles as the `threadId` its PTYs attach under. */
+export const TerminalSessionId = makeEntityId("TerminalSessionId");
+export type TerminalSessionId = typeof TerminalSessionId.Type;
 export const ApprovalRequestId = makeEntityId("ApprovalRequestId");
 export type ApprovalRequestId = typeof ApprovalRequestId.Type;
 export const CheckpointRef = makeEntityId("CheckpointRef");

@@ -2,7 +2,7 @@ import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { msg, T, useMessages } from "gt-react";
-import { StarIcon } from "lucide-react";
+import { StarIcon, TerminalSquareIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -56,6 +56,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
+  /** Offered as a pseudo-provider: starts a sticky terminal session instead of picking a model. */
+  onSelectTerminal?: () => void;
 }) {
   const m = useMessages();
   const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
@@ -227,6 +229,32 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               </div>
             );
           })}
+
+          {props.onSelectTerminal ? (
+            <div className="relative mt-auto w-full border-t border-border/70 pt-1">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Toolbar.Button
+                      className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+                      onClick={props.onSelectTerminal}
+                      type="button"
+                      aria-label={m(msg("Terminal"))}
+                    >
+                      <TerminalSquareIcon className="size-5 shrink-0" aria-hidden />
+                    </Toolbar.Button>
+                  }
+                />
+                <TooltipPopup
+                  side={PICKER_TOOLTIP_SIDE}
+                  sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                  align="center"
+                >
+                  <T>Terminal</T>
+                </TooltipPopup>
+              </Tooltip>
+            </div>
+          ) : null}
         </div>
       </div>
     </Toolbar.Root>

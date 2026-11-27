@@ -18,6 +18,7 @@ import {
   type AtomCommand,
   createAtomCommandScheduler,
   createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
   createEnvironmentSubscriptionAtomFamily,
   isAtomCommandInterrupted,
   runAtomCommand,
@@ -76,6 +77,18 @@ export function createTerminalEnvironmentAtoms<R, E>(
   const terminalMetadataSummaries = Atom.family((feed: ReturnType<typeof metadataFeed>) =>
     Atom.mapResult(feed, ({ terminals }) => terminals),
   );
+  const sessionStoreList = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:terminal:session-store:list",
+    tag: WS_METHODS.terminalSessionsList,
+    staleTimeMs: 0,
+  });
+  const refreshSessionStore = (
+    target: { readonly environmentId: EnvironmentId },
+    registry: AtomRegistry.AtomRegistry,
+  ) =>
+    Effect.sync(() =>
+      registry.refresh(sessionStoreList({ environmentId: target.environmentId, input: {} })),
+    );
   const atoms = {
     observe: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:terminal:observe",
@@ -142,6 +155,32 @@ export function createTerminalEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    // Persisted "sticky" terminal sessions listed in the sidebar; distinct from
+    // `createSession` below, which drives one live terminal's attach lifecycle.
+    sessionStore: {
+      list: sessionStoreList,
+      create: createEnvironmentRpcCommand(runtime, {
+        label: "environment-data:terminal:session-store:create",
+        tag: WS_METHODS.terminalSessionCreate,
+        scheduler: lifecycleScheduler,
+        concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+        onSettled: refreshSessionStore,
+      }),
+      rename: createEnvironmentRpcCommand(runtime, {
+        label: "environment-data:terminal:session-store:rename",
+        tag: WS_METHODS.terminalSessionRename,
+        scheduler: lifecycleScheduler,
+        concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+        onSettled: refreshSessionStore,
+      }),
+      delete: createEnvironmentRpcCommand(runtime, {
+        label: "environment-data:terminal:session-store:delete",
+        tag: WS_METHODS.terminalSessionDelete,
+        scheduler: lifecycleScheduler,
+        concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+        onSettled: refreshSessionStore,
+      }),
+    },
   };
   return {
     ...atoms,

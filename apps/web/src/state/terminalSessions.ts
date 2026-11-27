@@ -13,6 +13,7 @@ import {
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
   TerminalAttachInput,
+  type TerminalSessionRecord,
   type TerminalSummary,
 } from "@t3tools/contracts";
 
@@ -279,6 +280,70 @@ export function useThreadRunningTerminalIds(input: {
 }): ReadonlyArray<string> {
   const sessions = useKnownTerminalSessions(input);
   return selectRunningSubprocessTerminalIds(sessions ?? []);
+}
+
+// Sticky terminal sessions persisted on the server, one query per environment.
+const stickyTerminalSessionsFamily = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make((get) => {
+    const result = get(terminalEnvironment.sessionStore.list({ environmentId, input: {} }));
+    return result._tag === "Success" ? result.value.sessions : null;
+  }).pipe(Atom.withLabel(`web-sticky-terminal-sessions:${environmentId}`)),
+);
+const stickyTerminalSessionsListAtom = environmentAtomList(
+  "web-sticky-terminal-sessions",
+  stickyTerminalSessionsFamily,
+);
+const NO_STICKY_TERMINAL_SESSIONS_ATOM = Atom.make<ReadonlyArray<TerminalSessionRecord> | null>(
+  null,
+);
+
+export interface StickyTerminalSessionEntry {
+  readonly environmentId: EnvironmentId;
+  readonly record: TerminalSessionRecord;
+}
+
+const stickyEntriesByResults = new WeakMap<
+  ReadonlyArray<ReadonlyArray<TerminalSessionRecord> | null>,
+  ReadonlyArray<StickyTerminalSessionEntry>
+>();
+
+/** Every persisted terminal session across the given environments, oldest first per environment. */
+export function useStickyTerminalSessions(
+  environmentIds: ReadonlyArray<EnvironmentId>,
+): ReadonlyArray<StickyTerminalSessionEntry> {
+  const readable = useEnvironmentsWithScope(
+    environmentIds.map((environmentId) => ({ environmentId })),
+    AuthTerminalReadScope,
+  );
+  const readableIds = environmentIds.filter((environmentId) => readable.has(environmentId));
+  const results = useAtomValue(stickyTerminalSessionsListAtom(environmentIdsKey(readableIds)));
+  let entries = stickyEntriesByResults.get(results);
+  if (!entries) {
+    entries = results.flatMap((sessions, index) =>
+      (sessions ?? []).map((record) => ({
+        environmentId: readableIds[index]!,
+        record,
+      })),
+    );
+    stickyEntriesByResults.set(results, entries);
+  }
+  return entries;
+}
+
+/** One persisted terminal session by id; `loaded` distinguishes "still fetching" from "absent". */
+export function useStickyTerminalSession(
+  environmentId: EnvironmentId | null,
+  sessionId: string | null,
+): { readonly record: TerminalSessionRecord | null; readonly loaded: boolean } {
+  const sessions = useAtomValue(
+    environmentId === null || sessionId === null
+      ? NO_STICKY_TERMINAL_SESSIONS_ATOM
+      : stickyTerminalSessionsFamily(environmentId),
+  );
+  return {
+    record: sessions?.find((record) => record.id === sessionId) ?? null,
+    loaded: sessions !== null,
+  };
 }
 
 // A string so status updates that keep every label notify no one.

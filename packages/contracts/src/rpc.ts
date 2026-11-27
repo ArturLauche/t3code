@@ -337,7 +337,14 @@ import {
   TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalResizeInput,
+  TerminalSessionCreateInput,
+  TerminalSessionDeleteInput,
+  TerminalSessionListInput,
+  TerminalSessionListResult,
+  TerminalSessionRecord,
+  TerminalSessionRenameInput,
   TerminalSessionSnapshot,
+  TerminalSessionStoreError,
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
@@ -579,6 +586,10 @@ export const WS_METHODS = {
   terminalResize: "terminal.resize",
   terminalClear: "terminal.clear",
   terminalClose: "terminal.close",
+  terminalSessionsList: "terminalSessions.list",
+  terminalSessionCreate: "terminalSession.create",
+  terminalSessionRename: "terminalSession.rename",
+  terminalSessionDelete: "terminalSession.delete",
 
   previewOpen: "preview.open",
   previewResize: "preview.resize",
@@ -2068,6 +2079,29 @@ const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
 });
 
+const WsTerminalSessionsListRpc = Rpc.make(WS_METHODS.terminalSessionsList, {
+  payload: TerminalSessionListInput,
+  success: TerminalSessionListResult,
+  error: Schema.Union([TerminalSessionStoreError, EnvironmentAuthorizationError]),
+});
+
+const WsTerminalSessionCreateRpc = Rpc.make(WS_METHODS.terminalSessionCreate, {
+  payload: TerminalSessionCreateInput,
+  success: TerminalSessionRecord,
+  error: Schema.Union([TerminalSessionStoreError, EnvironmentAuthorizationError]),
+});
+
+const WsTerminalSessionRenameRpc = Rpc.make(WS_METHODS.terminalSessionRename, {
+  payload: TerminalSessionRenameInput,
+  success: TerminalSessionRecord,
+  error: Schema.Union([TerminalSessionStoreError, EnvironmentAuthorizationError]),
+});
+
+const WsTerminalSessionDeleteRpc = Rpc.make(WS_METHODS.terminalSessionDelete, {
+  payload: TerminalSessionDeleteInput,
+  error: Schema.Union([TerminalSessionStoreError, EnvironmentAuthorizationError]),
+});
+
 const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
@@ -2784,6 +2818,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalResizeRpc,
   WsTerminalClearRpc,
   WsTerminalCloseRpc,
+  WsTerminalSessionsListRpc,
+  WsTerminalSessionCreateRpc,
+  WsTerminalSessionRenameRpc,
+  WsTerminalSessionDeleteRpc,
   WsSubscribeTerminalMetadataRpc,
   WsPreviewOpenRpc,
   WsPreviewResizeRpc,

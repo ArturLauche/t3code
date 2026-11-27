@@ -54,6 +54,7 @@ import { Route as ChatSettingsAccessRouteImport } from './routes/_chat.settings.
 import { Route as ChatSettingsAboutRouteImport } from './routes/_chat.settings.about'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as ChatEnvironmentIdTerminalSessionIdRouteImport } from './routes/_chat.$environmentId.terminal.$sessionId'
 import { Route as ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRouteImport } from './routes/_chat.linked.$viaEnvironmentId.$linkedEnvironmentId.$linkedThreadId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
@@ -286,6 +287,12 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const ChatEnvironmentIdTerminalSessionIdRoute =
+  ChatEnvironmentIdTerminalSessionIdRouteImport.update({
+    id: '/$environmentId/terminal/$sessionId',
+    path: '/$environmentId/terminal/$sessionId',
+    getParentRoute: () => ChatRoute,
+  } as any)
 const ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute =
   ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRouteImport.update(
     {
@@ -340,6 +347,7 @@ export interface FileRoutesByFullPath {
   '/settings/voice': typeof ChatSettingsVoiceRoute
   '/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
+  '/$environmentId/terminal/$sessionId': typeof ChatEnvironmentIdTerminalSessionIdRoute
   '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
 }
 export interface FileRoutesByTo {
@@ -387,6 +395,7 @@ export interface FileRoutesByTo {
   '/settings/voice': typeof ChatSettingsVoiceRoute
   '/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
+  '/$environmentId/terminal/$sessionId': typeof ChatEnvironmentIdTerminalSessionIdRoute
   '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
 }
 export interface FileRoutesById {
@@ -436,6 +445,7 @@ export interface FileRoutesById {
   '/_chat/settings/voice': typeof ChatSettingsVoiceRoute
   '/_chat/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
+  '/_chat/$environmentId/terminal/$sessionId': typeof ChatEnvironmentIdTerminalSessionIdRoute
   '/_chat/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
 }
 export interface FileRouteTypes {
@@ -485,6 +495,7 @@ export interface FileRouteTypes {
     | '/settings/voice'
     | '/settings/worktrees'
     | '/threads/$environmentId/$threadId'
+    | '/$environmentId/terminal/$sessionId'
     | '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -532,6 +543,7 @@ export interface FileRouteTypes {
     | '/settings/voice'
     | '/settings/worktrees'
     | '/threads/$environmentId/$threadId'
+    | '/$environmentId/terminal/$sessionId'
     | '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
   id:
     | '__root__'
@@ -580,6 +592,7 @@ export interface FileRouteTypes {
     | '/_chat/settings/voice'
     | '/_chat/settings/worktrees'
     | '/threads/$environmentId/$threadId'
+    | '/_chat/$environmentId/terminal/$sessionId'
     | '/_chat/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
   fileRoutesById: FileRoutesById
 }
@@ -912,6 +925,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/$environmentId/terminal/$sessionId': {
+      id: '/_chat/$environmentId/terminal/$sessionId'
+      path: '/$environmentId/terminal/$sessionId'
+      fullPath: '/$environmentId/terminal/$sessionId'
+      preLoaderRoute: typeof ChatEnvironmentIdTerminalSessionIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': {
       id: '/_chat/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
       path: '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
@@ -996,6 +1016,7 @@ interface ChatRouteChildren {
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
+  ChatEnvironmentIdTerminalSessionIdRoute: typeof ChatEnvironmentIdTerminalSessionIdRoute
   ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute: typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
 }
 
@@ -1009,6 +1030,8 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,
+  ChatEnvironmentIdTerminalSessionIdRoute:
+    ChatEnvironmentIdTerminalSessionIdRoute,
   ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute:
     ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute,
 }

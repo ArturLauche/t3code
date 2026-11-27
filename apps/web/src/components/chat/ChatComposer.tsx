@@ -49,6 +49,7 @@ import type {
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
+  AuthTerminalOperateScope,
   clampManagedRuntimeMode,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -209,6 +210,8 @@ import { rememberCopiedComposerAttachments } from "~/lib/copiedComposerAttachmen
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
 import { droppedThreadContextRecord } from "./threadContextDrop.logic";
 import { readThreadShell } from "~/state/entities";
+import { terminalEnvironment } from "../../state/terminal";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useLinkedEnvironments } from "~/state/peerLinks";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import type {
@@ -2765,6 +2768,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : composerControlsCollapsed
       ? 0
       : expandedControlsIconOnlyBlockCount;
+  const createStickyTerminalSession = useAtomCommand(terminalEnvironment.sessionStore.create, {
+    reportFailure: false,
+  });
+  const handleSelectTerminalSession = async () => {
+    if (activeProjectId === null || gitCwd === null) return;
+    if (!readEnvironmentScope(environmentId, AuthTerminalOperateScope)) return;
+    const result = await createStickyTerminalSession({
+      environmentId,
+      input: { projectId: activeProjectId, cwd: gitCwd },
+    });
+    if (result._tag === "Success") {
+      void navigate({
+        to: "/$environmentId/terminal/$sessionId",
+        params: { environmentId, sessionId: result.value.id },
+      });
+    }
+  };
   const composerControls = (
     <RuntimeModeLimitsTargetContext value={runtimeModeLimitsFor}>
       <ComposerControlsBar
@@ -2813,6 +2833,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onModelPickerOpenChange={setIsComposerModelPickerOpen}
         modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
         getModelDisabledReason={getModelDisabledReason}
+        {...(activeProjectId !== null && gitCwd !== null
+          ? { onSelectTerminal: () => void handleSelectTerminalSession() }
+          : {})}
       />
     </RuntimeModeLimitsTargetContext>
   );

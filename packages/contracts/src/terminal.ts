@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProjectId, TerminalSessionId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 export const DEFAULT_TERMINAL_ID = "term-1";
@@ -527,6 +527,64 @@ export const TerminalCwdError = Schema.Union([
   TerminalCwdStatError,
 ]);
 export type TerminalCwdError = typeof TerminalCwdError.Type;
+
+/**
+ * A sticky terminal session: a named, persisted entry in the sidebar whose PTY
+ * outlives the client. The record's `id` is the `threadId` every `terminal.*`
+ * call for it uses, so its scrollback history survives server restarts too.
+ */
+export const TerminalSessionRecord = Schema.Struct({
+  id: TerminalSessionId,
+  projectId: ProjectId,
+  title: Schema.String.check(Schema.isMaxLength(128)),
+  cwd: TrimmedNonEmptyString,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type TerminalSessionRecord = typeof TerminalSessionRecord.Type;
+
+export const TerminalSessionListInput = Schema.Struct({});
+export type TerminalSessionListInput = typeof TerminalSessionListInput.Type;
+
+export const TerminalSessionListResult = Schema.Struct({
+  sessions: Schema.Array(TerminalSessionRecord),
+});
+export type TerminalSessionListResult = typeof TerminalSessionListResult.Type;
+
+export const TerminalSessionCreateInput = Schema.Struct({
+  projectId: ProjectId,
+  title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128))),
+  cwd: TrimmedNonEmptyString,
+  worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  env: Schema.optional(TerminalEnvSchema),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+});
+export type TerminalSessionCreateInput = typeof TerminalSessionCreateInput.Type;
+
+export const TerminalSessionRenameInput = Schema.Struct({
+  id: TerminalSessionId,
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+});
+export type TerminalSessionRenameInput = typeof TerminalSessionRenameInput.Type;
+
+export const TerminalSessionDeleteInput = Schema.Struct({
+  id: TerminalSessionId,
+});
+export type TerminalSessionDeleteInput = typeof TerminalSessionDeleteInput.Type;
+
+export class TerminalSessionStoreError extends Schema.TaggedError<TerminalSessionStoreError>()(
+  "TerminalSessionStoreError",
+  {
+    operation: Schema.Literals(["read", "write", "decode"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Failed to ${this.operation} the terminal session store`;
+  }
+}
 
 export class TerminalHistoryError extends Schema.TaggedError<TerminalHistoryError>()(
   "TerminalHistoryError",
